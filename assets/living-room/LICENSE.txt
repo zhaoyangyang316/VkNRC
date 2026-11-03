@@ -1,0 +1,25 @@
+Living Room / The White Room Cycles
+Copyright (c) 2012 Jay-Artist (Jay).
+
+Licensed under Creative Commons Attribution 3.0 Unported (CC BY 3.0):
+https://creativecommons.org/licenses/by/3.0/
+Full legal terms: https://creativecommons.org/licenses/by/3.0/legalcode
+
+Original model: https://www.blendswap.com/blends/view/41683
+Archive: https://casual-effects.com/g3d/data10/index.html#mesh21
+Download: https://casual-effects.com/g3d/data10/research/model/living_room/living_room.zip
+
+Originally converted from Blender to Mitsuba/Tungsten/PBRT by Benedikt Bitterli.
+Converted to OBJ by Nicholas Hull at NVIDIA; material corrections by Morgan
+McGuire at Williams College to match Bitterli's reference images.
+Camera metadata comes from Bitterli's matching living-room-2 scene:
+https://benedikt-bitterli.me/resources/mitsuba/living-room-2.zip
+
+VkNRC adaptations: added a normalized camera preset, converted texture path
+separators to '/', and added explicit Beckmann roughness values using
+Pr = sqrt(2 / (Ns + 2)). Geometry, textures, light placement and Ke radiance
+are retained from the McGuire archive. See README.md for renderer limitations.
+
+You may share and adapt this material, including commercially, provided you
+give appropriate credit, link the license and indicate modifications. No
+endorsement by the original authors is implied. The license link above governs.

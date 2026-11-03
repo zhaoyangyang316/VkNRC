@@ -1,0 +1,145 @@
+# VkNRC material approximations; see ATTRIBUTION.txt.
+
+newmtl LandscapeBSDF
+Kd 1 1 1
+Ks 0 0 0
+Ke 0 0 0
+Ni 1.5
+Pr 1
+Pm 0
+d 1
+illum 2
+map_Kd textures/landscapebsdf.jpg
+
+newmtl TableBSDF
+Kd 1 1 1
+Ks 0 0 0
+Ke 0 0 0
+Ni 1.5
+Pr 1
+Pm 0
+d 1
+illum 2
+map_Kd textures/tablebsdf.jpg
+
+newmtl DoorHandleBSDF
+Kd 0 0 0
+Ks 1 0.988962836478 0.990152624817
+Ke 0 0 0
+Ni 53.5735483205
+Pr 0.25
+Pm 0
+d 1
+illum 2
+
+newmtl DoorBSDF
+Kd 1 1 1
+Ks 0 0 0
+Ke 0 0 0
+Ni 1.5
+Pr 1
+Pm 0
+d 1
+illum 2
+map_Kd textures/doorbsdf.jpg
+
+newmtl DiffuseBSDF
+Kd 0.8 0.8 0.8
+Ks 0 0 0
+Ke 0 0 0
+Ni 1.5
+Pr 1
+Pm 0
+d 1
+illum 2
+
+newmtl FloorBSDF
+Kd 0 0 0
+Ks 1 0.988962836478 0.990152624817
+Ke 0 0 0
+Ni 53.5735483205
+Pr 0.1
+Pm 0
+d 1
+illum 2
+map_Ks textures/floorbsdf-checker.png
+
+newmtl DoorFrameBSDF
+Kd 0.247059 0.168627 0.0901961
+Ks 0 0 0
+Ke 0 0 0
+Ni 1.5
+Pr 1
+Pm 0
+d 1
+illum 2
+
+newmtl PictureFrameBSDF
+Kd 0.258824 0.207843 0.145098
+Ks 0 0 0
+Ke 0 0 0
+Ni 1.5
+Pr 1
+Pm 0
+d 1
+illum 2
+
+newmtl HingeBSDF
+Kd 0 0 0
+Ks 1 0.988962836478 0.990152624817
+Ke 0 0 0
+Ni 53.5735483205
+Pr 0.1
+Pm 0
+d 1
+illum 2
+
+newmtl LightBSDF
+Kd 0 0 0
+Ks 0 0 0
+Ke 0 0 0
+Ni 1.5
+Pr 1
+Pm 0
+d 1
+illum 2
+
+newmtl Pot2BSDF
+Kd 0 0 0
+Ks 1 0.988962836478 0.990152624817
+Ke 0 0 0
+Ni 53.5735483205
+Pr 0.15
+Pm 0
+d 1
+illum 2
+
+newmtl MaterialBSDF
+Kd 0 0 0
+Ks 1 1 1
+Ke 0 0 0
+Ni 1.5
+Pr 0.001
+Pm 0
+d 1
+illum 2
+
+newmtl Pot3BSDF
+Kd 0.8 0.8 0.8
+Ks 0 0 0
+Ke 0 0 0
+Ni 1.5
+Pr 1
+Pm 0
+d 1
+illum 2
+
+newmtl LightBSDF_Emission
+Kd 0 0 0
+Ks 0 0 0
+Ke 1000 1000 1000
+Ni 1.5
+Pr 1
+Pm 0
+d 1
+illum 2

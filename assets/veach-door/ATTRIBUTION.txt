@@ -1,0 +1,41 @@
+Veach Door (source title: Veach, Ajar)
+Scene by Benedikt Bitterli, inspired by Eric Veach's ajar-door transport test.
+Source collection: https://benedikt-bitterli.me/resources/
+Source archive: https://benedikt-bitterli.me/resources/mitsuba/veach-ajar.zip
+License: CC0 / public domain; original license is preserved in LICENSE.txt.
+Catalog reference: https://casual-effects.com/g3d/data10/index.html
+
+Reproduce from the extracted Mitsuba archive, using Python 3 (standard library only):
+python scripts/import-veach-door.py --source build/scene-import/veach-source/veach-ajar
+
+Conversion and renderer limitations:
+- All source shapes and their world transforms are preserved. The Mitsuba rectangle
+  [-1,1]^2 is triangulated with the original +Z winding before transformation.
+  Its original area-emitter radiance is Ke 1000 1000 1000. No extra lights or
+  emissive surfaces were added. VkNRC evaluates mesh emission on both sides;
+  Mitsuba's area emitter is one-sided, so exact lighting is not guaranteed.
+- 62 zero-area source triangles are omitted to avoid undefined normals;
+  this does not change visible geometry. All original vertices are retained.
+- The original camera position and +Z viewing direction are normalized using
+  the merged OBJ AABB, exactly as Scene.cpp does. Horizontal 60-degree FOV at
+  1280x720 becomes the vertical FOV stored in veach-door.camera. VkNRC uses
+  world-up; the source camera's negligible roll is not represented.
+- Diffuse colors and three original JPEG bitmap files are preserved.
+- Complex conductor Fresnel is approximated with a scalar Schlick F0 and RGB
+  Ks tint, fitted to the exact source RGB normal-incidence reflectance.
+  The large effective Ni is a numerical Fresnel fit, not a physical glass IOR.
+  Source alpha is preserved; GGX distributions become renderer-supported
+  Beckmann distributions, so glossy tails and grazing reflections differ.
+- The checkerboard has the source 20x80 UV scale and two checks per unit UV.
+  It is baked into a 256x256 lossless PNG, including the conductor tint,
+  encoded to sRGB because VkNRC linearizes all color textures. Eight-bit
+  quantization and bilinear filtering slightly soften the procedural edges.
+- The glass teapot is an opaque reflective dielectric (Ni 1.5, alpha .001).
+  VkNRC has no transmission, refraction, or glass caustics, so it cannot
+  reproduce the transparent original teapot. Geometry remains intact.
+- VkNRC uses triangle geometric normals, including where the source uses
+  smooth vertex normals. Twosided source surfaces are compatible with its
+  face-forward shading. Every face has a material and valid UV indices.
+
+import-report.json records input SHA-256 hashes, geometry counts, bounds,
+camera conversion, light geometry, and material fitting parameters.

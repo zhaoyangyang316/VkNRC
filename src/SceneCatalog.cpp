@@ -2,6 +2,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <fstream>
+#include <locale>
+#include <sstream>
 #include <system_error>
 
 #ifdef _WIN32
@@ -74,6 +78,102 @@ void AddDiagnostic(SceneCatalog &catalog, const std::string &message) {
 	catalog.diagnostic += message;
 }
 
+void LoadCameraSidecar(SceneCatalog &catalog, SceneCatalogEntry &entry) {
+	auto sidecar = entry.path;
+	sidecar.replace_extension(".camera");
+	std::error_code error;
+	const bool exists = fs::exists(sidecar, error);
+	if (!exists && !error)
+		return;
+	std::ifstream file(sidecar);
+	if (error || !file) {
+		AddDiagnostic(catalog, "Cannot read camera sidecar " + Utf8(sidecar));
+		return;
+	}
+	SceneCamera camera;
+	std::optional<std::string> name;
+	bool has_position = false, has_target = false, has_fov = false;
+	std::string line;
+	size_t line_number = 0;
+	const auto invalid = [&](const std::string &reason) {
+		AddDiagnostic(catalog, "Ignoring camera sidecar " + Utf8(sidecar) + " at line " +
+		                           std::to_string(line_number) + ": " + reason);
+	};
+	while (std::getline(file, line)) {
+		++line_number;
+		if (line_number == 1 && line.starts_with("\xEF\xBB\xBF"))
+			line.erase(0, 3);
+		if (const auto comment = line.find('#'); comment != std::string::npos)
+			line.erase(comment);
+		std::istringstream fields(line);
+		fields.imbue(std::locale::classic());
+		std::string key;
+		if (!(fields >> key))
+			continue;
+		if (key == "name") {
+			std::string value;
+			std::getline(fields >> std::ws, value);
+			if (const auto last = value.find_last_not_of(" \t\r"); last != std::string::npos)
+				value.erase(last + 1);
+			else
+				value.clear();
+			if (name || value.empty()) {
+				invalid("name must be nonempty and appear only once");
+				return;
+			}
+			name = std::move(value);
+			continue;
+		}
+		if (key == "position" || key == "target") {
+			auto &value = key == "position" ? camera.position : camera.target;
+			bool &present = key == "position" ? has_position : has_target;
+			if (present || !(fields >> value[0] >> value[1] >> value[2]) ||
+			    !std::all_of(value.begin(), value.end(), [](float x) { return std::isfinite(x); })) {
+				invalid(key + " must contain three finite numbers and appear only once");
+				return;
+			}
+			present = true;
+		} else if (key == "fov") {
+			if (has_fov || !(fields >> camera.fov_degrees) || !std::isfinite(camera.fov_degrees) ||
+			    camera.fov_degrees <= 0.0f || camera.fov_degrees >= 179.0f) {
+				invalid("fov must appear once and be between 0 and 179 degrees");
+				return;
+			}
+			has_fov = true;
+		} else {
+			invalid("unknown field " + key);
+			return;
+		}
+		std::string extra;
+		if (fields >> extra) {
+			invalid("unexpected value after " + key);
+			return;
+		}
+	}
+	if (file.bad()) {
+		invalid("file read failed");
+		return;
+	}
+	if (has_position || has_target || has_fov) {
+		if (!has_position || !has_target || !has_fov) {
+			invalid("camera requires position, target and fov");
+			return;
+		}
+		double length_squared = 0.0;
+		for (size_t axis = 0; axis < 3; ++axis) {
+			const double delta = double(camera.target[axis]) - camera.position[axis];
+			length_squared += delta * delta;
+		}
+		if (!(length_squared > 0.0)) {
+			invalid("position and target must differ");
+			return;
+		}
+		entry.camera = camera;
+	}
+	if (name)
+		entry.label = std::move(*name);
+}
+
 void AddEntry(SceneCatalog &catalog, const fs::path &path, const fs::path &cornell_path, bool custom) {
 	const auto normalized = NormalizePath(path);
 	for (const auto &entry : catalog.entries)
@@ -88,7 +188,9 @@ void AddEntry(SceneCatalog &catalog, const fs::path &path, const fs::path &corne
 	} else {
 		label = Utf8(normalized) + " (custom)";
 	}
-	catalog.entries.push_back({.label = std::move(label), .path = normalized, .is_cornell = is_cornell});
+	SceneCatalogEntry entry{.label = std::move(label), .path = normalized, .is_cornell = is_cornell};
+	LoadCameraSidecar(catalog, entry);
+	catalog.entries.push_back(std::move(entry));
 }
 } // namespace
 

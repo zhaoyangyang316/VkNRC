@@ -28,7 +28,8 @@ cmake --build build --config Release --target VkNRC --parallel 8
 The executable is `build/Release/VkNRC.exe`. Shaders are compiled and embedded in
 the executable. The renderer needs Vulkan 1.3 functionality, NVIDIA cooperative
 matrices (`VK_NV_cooperative_matrix`), ray queries/acceleration structures, FP16
-arithmetic/storage and float32 atomic addition. A CUDA installation alone does not
+arithmetic/storage, float32 atomic addition and nonuniform sampled-image indexing.
+A CUDA installation alone does not
 satisfy these Vulkan requirements. Compiled neural shaders support subgroups of
 16 or 32 threads.
 
@@ -64,9 +65,10 @@ To use another scene, pass an OBJ path:
 ```
 
 The **Scene** dropdown lists OBJ files recursively under `assets`, plus a custom
-scene supplied on the command line. Cornell is currently the only bundled scene;
-place additional OBJ/MTL files and their textures under `assets` before starting
-to add them to the list. Selecting a scene resets its camera, network and
+scene supplied on the command line. The bundled scenes are **Cornell Box**,
+**Living Room**, and **Veach Door**, each with a camera preset. Place additional
+OBJ/MTL files and their textures under `assets` before starting to add them to
+the list. Selecting a scene resets its camera, network and
 accumulation, unlocks training, and resumes rendering. A failed load keeps the
 previous scene and shows an error. Assets are located relative to the executable
 (including the repository above `build/Release`), with the configured source path
@@ -79,6 +81,58 @@ rescales geometry to a maximum extent of 2 units. For custom scenes, without cam
 options the camera starts at the origin looking toward negative Z; large imported scenes may start
 with the camera inside geometry. `--camera x y z` sets its position in normalized
 scene coordinates, and `--fov degrees` sets the vertical field of view.
+A sibling `scene.camera` file can supply a friendly dropdown label and default
+camera for `scene.obj`; command-line camera options override it at startup:
+
+```text
+name My Scene
+position 0 0 1
+target 0 0 0
+fov 60
+```
+
+Camera coordinates use the same normalization as the OBJ: subtract the mesh AABB
+center, then multiply by `2 / max(extent)`. Cameras use Y-up without roll; `fov`
+is vertical in degrees. Lines beginning with `#` are comments. Invalid sidecars
+produce a catalog diagnostic and use the normal camera fallback.
+
+The two imported scenes preserve their source area lights; no extra illumination
+was added. Their assigned, nondegenerate emissive geometry was checked in the
+running renderer:
+
+| Scene | Source lights | Triangles sampled by NEE | Environment intensity |
+| --- | --- | ---: | ---: |
+| Living Room | BackLight (`Ke 2 2 2`), LeftLight, MiddleLight, RightLight (`Ke 5 5 5`) | 8 | 0 |
+| Veach Door | Original rectangle (`Ke 1000 1000 1000`) | 2 | 0 |
+
+**Living Room** is Jay-Artist's *The White Room Cycles* from the requested
+[McGuire archive entry](https://casual-effects.com/g3d/data10/index.html#mesh21),
+licensed CC BY 3.0. The OBJ conversion is by Nicholas Hull, with material
+corrections by Morgan McGuire; the original camera comes from Benedikt Bitterli's
+matching `living-room-2` conversion. Its geometry, textures and emitter radiance
+are retained. The MTL adds explicit roughness using `Pr = sqrt(2 / (Ns + 2))`.
+This is the archive model; the NRC paper's exact camera, lighting and Falcor
+material configuration are not reproduced or independently verified here.
+See [Living Room attribution](assets/living-room/LICENSE.txt).
+
+**Veach Door** is Benedikt Bitterli's CC0 *Veach, Ajar* from his
+[rendering resources](https://benedikt-bitterli.me/resources/). Its transformed
+meshes, original area emitter, textures and camera were converted to OBJ/MTL;
+62 zero-area source triangles were omitted. The conversion is reproducible with
+`scripts/import-veach-door.py --source <extracted-veach-ajar-directory>` using
+Python 3's standard library. See [conversion details](assets/veach-door/ATTRIBUTION.txt)
+and [input hashes and light audit](assets/veach-door/import-report.json).
+
+Both are adaptations to VkNRC's current surface model: it uses flat triangle
+normals and opaque materials, with Beckmann specular reflection and two-sided
+mesh emission. Living Room's lampshade is opaque; Veach Door's glass teapot has
+reflection but no transmission or refraction, and conductor/GGX materials are
+approximated. These limitations affect agreement with the source renders.
+The imported camera/catalog checks and Release build passed locally. Both scenes
+also completed 1,024 training frames followed by 512 samples per method at
+1280x720, with finite NRC/path-tracing captures and no reported Vulkan validation
+errors. This checks successful loading and rendering, not convergence or agreement
+with the paper.
 
 Environment lighting is automatically disabled when a material assigned to scene
 triangles emits light. Otherwise the renderer keeps its white environment at

@@ -259,7 +259,8 @@ template <VkScene::TexLoad... Loads> void VkScene::load_textures(const Scene &sc
 			                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL));
 			command_buffer->CmdCopy(staging_buffer, image, {copy});
 			command_buffer->CmdPipelineBarrier(
-			    VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, {}, {},
+			    VK_PIPELINE_STAGE_TRANSFER_BIT,
+			    VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, {}, {},
 			    image->GetDstMemoryBarriers({copy}, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
 			                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 			                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));

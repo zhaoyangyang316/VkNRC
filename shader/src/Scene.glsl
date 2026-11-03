@@ -1,6 +1,10 @@
 #ifndef SCENE_GLSL
 #define SCENE_GLSL
 
+#if defined(SCENE_TEXTURE_BINDING) && defined(SCENE_TEXTURE_NUM_CONST_ID)
+#extension GL_EXT_nonuniform_qualifier : require
+#endif
+
 #ifndef SCENE_SET_ID
 #define SCENE_SET_ID 0
 #endif
@@ -61,13 +65,13 @@ layout(constant_id = SCENE_TEXTURE_NUM_CONST_ID) const uint kTextureNum = 1024;
 layout(set = SCENE_SET_ID, binding = SCENE_TEXTURE_BINDING) uniform sampler2D uTextures[kTextureNum];
 
 vec3 GetSceneDiffuse(in const Material mat, in const vec2 texcoord) {
-	return mat.diffuse_texture_id == -1 ? mat.diffuse : texture(uTextures[mat.diffuse_texture_id], texcoord).rgb;
+	return mat.diffuse_texture_id == -1 ? mat.diffuse : texture(uTextures[nonuniformEXT(mat.diffuse_texture_id)], texcoord).rgb;
 }
 vec3 GetSceneSpecular(in const Material mat, in const vec2 texcoord) {
-	return mat.specular_texture_id == -1 ? mat.specular : texture(uTextures[mat.specular_texture_id], texcoord).rgb;
+	return mat.specular_texture_id == -1 ? mat.specular : texture(uTextures[nonuniformEXT(mat.specular_texture_id)], texcoord).rgb;
 }
 vec3 GetSceneEmission(in const Material mat, in const vec2 texcoord) {
-	return mat.emission_texture_id == -1 ? mat.emission : texture(uTextures[mat.emission_texture_id], texcoord).rgb;
+	return mat.emission_texture_id == -1 ? mat.emission : texture(uTextures[nonuniformEXT(mat.emission_texture_id)], texcoord).rgb;
 }
 #endif
 

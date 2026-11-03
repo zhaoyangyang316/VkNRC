@@ -1,0 +1,5 @@
+# Original Mitsuba camera, mapped by VkNRC's centered 2/max_extent normalization.
+name Veach Door
+position 0.604601472934 -0.03222587359 0.139781761676
+target 0.488649816593 -0.0360086863574 0.123711222723
+fov 35.9833977714

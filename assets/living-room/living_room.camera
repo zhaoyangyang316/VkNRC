@@ -1,0 +1,10 @@
+# Camera from Bitterli's living-room-2/scene_v3.xml (The White Room).
+# https://benedikt-bitterli.me/resources/mitsuba/living-room-2.zip
+# Mesh019.obj floor bounds agree with this OBJ within 4e-6 source units.
+# Applied Scene.cpp normalization: (source - [0.283065, 1.5978375, 3.874201]) * 0.2325879432457508.
+# Source camera: position [2.25009, 1.31171, 6.17872], forward [-0.434176, -0.0366305, -0.900083].
+# Converted 90-degree horizontal FOV at 1280x720 to vertical FOV.
+name Living Room
+position 0.4575062991 -0.0665498067 0.5360033344
+target 0.3565221962 -0.0750696194 0.3266548807
+fov 58.71550709

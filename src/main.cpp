@@ -14,9 +14,19 @@
 
 constexpr uint32_t kFrameCount = 3, kWidth = 1280, kHeight = 720;
 
-static void ResetSceneCamera(Camera &camera, bool is_cornell) {
+static void ResetSceneCamera(Camera &camera, const SceneCatalogEntry &entry) {
 	camera = Camera{};
-	if (is_cornell) {
+	if (entry.camera) {
+		const auto &preset = *entry.camera;
+		camera.position = {preset.position[0], preset.position[1], preset.position[2]};
+		const glm::dvec3 delta{double(preset.target[0]) - preset.position[0],
+		                      double(preset.target[1]) - preset.position[1],
+		                      double(preset.target[2]) - preset.position[2]};
+		const auto direction = glm::normalize(delta);
+		camera.yaw = static_cast<float>(std::atan2(-direction.x, -direction.z));
+		camera.pitch = static_cast<float>(std::asin(std::clamp(direction.y, -1.0, 1.0)));
+		camera.fov = glm::radians(preset.fov_degrees);
+	} else if (entry.is_cornell) {
 		camera.position = {0.0f, -0.005007153f, 3.86123033f};
 		camera.fov = glm::radians(39.30765f);
 	}
@@ -104,8 +114,10 @@ int main(int argc, char **argv) {
 		spdlog::error("{}", scene_catalog.diagnostic);
 		return EXIT_FAILURE;
 	}
+	if (!scene_catalog.diagnostic.empty())
+		spdlog::warn("{}", scene_catalog.diagnostic);
 	size_t scene_index = *initial_scene;
-	ResetSceneCamera(*camera, scene_catalog.entries[scene_index].is_cornell);
+	ResetSceneCamera(*camera, scene_catalog.entries[scene_index]);
 	if (override_position)
 		camera->position = camera_position;
 	if (override_fov)
@@ -133,11 +145,18 @@ int main(int argc, char **argv) {
 		return -1;
 	}
 	spdlog::info("Physical Device: {}", physical_device->GetProperties().vk10.deviceName);
+	if (!physical_device->GetFeatures().vk12.shaderSampledImageArrayNonUniformIndexing) {
+		spdlog::error("Device '{}' lacks shaderSampledImageArrayNonUniformIndexing, required for per-ray material "
+		              "textures. Update the GPU driver or use a GPU supporting this Vulkan 1.2 feature.",
+		              physical_device->GetProperties().vk10.deviceName);
+		return EXIT_FAILURE;
+	}
 	auto features = physical_device->GetDefaultFeatures();
 	features.vk11.storageBuffer16BitAccess = VK_TRUE;
 	features.vk12.bufferDeviceAddress = VK_TRUE;
 	features.vk12.hostQueryReset = VK_TRUE;
 	features.vk12.shaderFloat16 = VK_TRUE;
+	features.vk12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
 	features.vk12.vulkanMemoryModel = VK_TRUE;
 	features.vk12.vulkanMemoryModelDeviceScope = VK_TRUE;
 	features.vk13.computeFullSubgroups = VK_TRUE;
@@ -382,7 +401,7 @@ int main(int argc, char **argv) {
 				vk_scene_tlas = myvk::MakePtr<VkSceneTLAS>(vk_scene_blas);
 				vk_nrc_state->ResetMLPBuffers();
 				vk_nrc_state->ResetAccumulateCount();
-				ResetSceneCamera(*camera, entry.is_cornell);
+				ResetSceneCamera(*camera, entry);
 				glfwGetCursorPos(window, &cam_control.prev_cursor_pos.x, &cam_control.prev_cursor_pos.y);
 				rebuild_render_graphs();
 				scene_index = *requested_scene;

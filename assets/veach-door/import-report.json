@@ -1,0 +1,191 @@
+{
+  "source": "https://benedikt-bitterli.me/resources/mitsuba/veach-ajar.zip",
+  "input_sha256": {
+    "LICENSE.txt": "31bf2084e780c7b42939cbb2018e47775552c23bd027809812f9d8a71af4ea9a",
+    "models/Mesh000.obj": "8dee9c7e5e1ad6544ae34c90d8b444c208b9c125f712c5a29a534329bcb7fa01",
+    "models/Mesh001.obj": "ef1b29dd1e52e105d8e0d609e68b5342b0615704b4baaad4b1c6cb60c560f982",
+    "models/Mesh002.obj": "3f5f7f12e9757c12d0de70a51bef2ae213a869cfb0b548f7d588b62928182be0",
+    "models/Mesh003.obj": "215ddc55cc11ac8371bdc6bcf543102fab807fffd732a33f94c3f6d21593bd1c",
+    "models/Mesh004.obj": "cae8ddb97371e04b60cd66ccc7ad341acd9315157f4801bddb3a9ef5d8743990",
+    "models/Mesh005.obj": "17d45bff1c3a42e2ccf1c4cdef61c3e1dec99d8f591470fb4899aa41a7440773",
+    "models/Mesh006.obj": "f11402f26b6be9a9353cb4fa6a03d8cf09397ea1e25bda73ca83dc3ba113d298",
+    "models/Mesh007.obj": "2bab75d901cae7648b77c4c18c2791993827b81beb83e516b7bc013b7b7c0fa2",
+    "models/Mesh008.obj": "31eb0711a8dedee1cf685ff6b175e0d9788d535fb81f197f16ef1ea7332a5738",
+    "models/Mesh009.obj": "2ea70cf1ed820b0858069e74fd4a0307ba2cbb29866415e0102145912b300077",
+    "models/Mesh010.obj": "1b660d5c92651346a3499db8fcfcb707b1eeb2c731c673a16dd8a53e52d79ac1",
+    "models/Mesh011.obj": "27aa423e5d82e503003adb171fda02afd9366acf4f6a7da7e45dff751893043e",
+    "models/Mesh012.obj": "57b31227ed03a343a03e33d18c6ebf73100195e1728ba8792e6b66a586f6ac08",
+    "models/Mesh013.obj": "2f497c921cd1af7c33f0ad43cbbd8ba57a039b00d7df6882fcc29b1857de885b",
+    "models/Mesh014.obj": "4c74ef0788b94a7218bc9156677f69133e51ae90849fddb80a0843cb13f71502",
+    "models/Mesh015.obj": "5afa1b93e13e3a03c564d210954392bb3eab3806c031a069b2eeed7f7781d02a",
+    "models/Mesh016.obj": "582d2cb0e9017dd830c02ee3dc7342f20020cc4eedb49d0dd335ad06fe303545",
+    "scene_v3.xml": "f2daff0e8c42015c73b7867bfcc7a6e60951a31451c776dfd2c971ebb03781be",
+    "textures/Good Textures_005844.jpg": "0246b94f6459f06e0efc92b9708fd35d57e80116acdbd8f1c723bca07769b106",
+    "textures/cherry-wood-texture.jpg": "8e29463aeb4e22555227fad592d4768afeb3103120459c0020ab7a0c1b4a0267",
+    "textures/landscape-with-a-lake.jpg": "3c3ce01a744aa1445afb1a2444d209336a1b2722cc53f5a054536960ed6d5fb7"
+  },
+  "vertex_count": 193076,
+  "texcoord_count": 193077,
+  "triangle_count": 382628,
+  "shape_count": 22,
+  "material_count": 14,
+  "fallback_uv_corners": 0,
+  "degenerate_triangles": 0,
+  "removed_zero_area_source_triangles": 62,
+  "world_bounds": {
+    "min": [
+      -9.6463408,
+      -0.01676,
+      -7.6
+    ],
+    "max": [
+      7.43,
+      3.8,
+      0.599999
+    ]
+  },
+  "normalization_center": [
+    -1.1081704000000006,
+    1.8916199999999999,
+    -3.5000004999999996
+  ],
+  "normalization_scale": 0.11712111063044607,
+  "camera": {
+    "world_position": [
+      4.05402,
+      1.61647,
+      -2.30652
+    ],
+    "world_target": [
+      3.0640050000000003,
+      1.5841717000000002,
+      -2.443733
+    ],
+    "position": [
+      0.6046014729338267,
+      -0.03222587358996721,
+      0.13978176167578005
+    ],
+    "target": [
+      0.48864981659302564,
+      -0.03600868635744253,
+      0.12371122272284465
+    ],
+    "horizontal_fov": 60.0,
+    "vertical_fov": 35.98339777135763,
+    "source_resolution": [
+      1280.0,
+      720.0
+    ]
+  },
+  "lights": [
+    {
+      "shape": "Light",
+      "triangle_count": 2,
+      "radiance": [
+        1000.0,
+        1000.0,
+        1000.0
+      ],
+      "world_area": 3.8607232208000206,
+      "world_vertices": [
+        [
+          -5.169544999999999,
+          2.8279199999999998,
+          -4.443770142138
+        ],
+        [
+          -3.708655,
+          2.8279199999999998,
+          -4.443770142138
+        ],
+        [
+          -3.708655,
+          0.1851999999999998,
+          -4.443769857862
+        ],
+        [
+          -5.169544999999999,
+          0.1851999999999998,
+          -4.443769857862
+        ]
+      ],
+      "world_normal": [
+        0.0,
+        -1.0756947390309599e-07,
+        -0.9999999999999942
+      ],
+      "normalized_area": 0.052958909259629115
+    }
+  ],
+  "materials": {
+    "LandscapeBSDF": {
+      "source_type": "diffuse"
+    },
+    "TableBSDF": {
+      "source_type": "diffuse"
+    },
+    "DoorHandleBSDF": {
+      "source_type": "roughconductor",
+      "source_f0": [
+        0.9280474783373094,
+        0.9178044665625541,
+        0.9189086466302002
+      ],
+      "fitted_ior": 53.57354832052818,
+      "source_distribution": "beckmann"
+    },
+    "DoorBSDF": {
+      "source_type": "diffuse"
+    },
+    "DiffuseBSDF": {
+      "source_type": "diffuse"
+    },
+    "FloorBSDF": {
+      "source_type": "roughconductor",
+      "source_f0": [
+        0.9280474783373094,
+        0.9178044665625541,
+        0.9189086466302002
+      ],
+      "fitted_ior": 53.57354832052818,
+      "source_distribution": "ggx"
+    },
+    "DoorFrameBSDF": {
+      "source_type": "diffuse"
+    },
+    "PictureFrameBSDF": {
+      "source_type": "diffuse"
+    },
+    "HingeBSDF": {
+      "source_type": "roughconductor",
+      "source_f0": [
+        0.9280474783373094,
+        0.9178044665625541,
+        0.9189086466302002
+      ],
+      "fitted_ior": 53.57354832052818,
+      "source_distribution": "ggx"
+    },
+    "LightBSDF": {
+      "source_type": "diffuse"
+    },
+    "Pot2BSDF": {
+      "source_type": "roughconductor",
+      "source_f0": [
+        0.9280474783373094,
+        0.9178044665625541,
+        0.9189086466302002
+      ],
+      "fitted_ior": 53.57354832052818,
+      "source_distribution": "ggx"
+    },
+    "MaterialBSDF": {
+      "source_type": "dielectric",
+      "limitation": "Opaque reflective dielectric approximation; no transmission or caustics."
+    },
+    "Pot3BSDF": {
+      "source_type": "diffuse"
+    }
+  }
+}
