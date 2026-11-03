@@ -35,7 +35,11 @@ Ptr<AccelerationStructure> AccelerationStructure::Create(const Ptr<BufferBase> &
 Ptr<AccelerationStructure> AccelerationStructure::Create(const Ptr<Device> &device, VkDeviceSize size,
                                                          VkAccelerationStructureTypeKHR type,
                                                          const std::vector<Ptr<Queue>> &access_queues) {
-	return Create(myvk::Buffer::Create(device, size, 0, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR,
+	// Create() queries the acceleration structure's device address, which also
+	// requires device-address usage on its backing buffer (VUID pInfo-09542).
+	return Create(myvk::Buffer::Create(device, size, 0,
+	                                   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+	                                       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
 	                                   VMA_MEMORY_USAGE_AUTO, access_queues),
 	              {.size = size, .type = type});
 }

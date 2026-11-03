@@ -33,6 +33,10 @@ public:
 		glm::vec3 translate;
 	};
 	static_assert(sizeof(Transform) == 12 * sizeof(float));
+	struct EmissiveTriangle {
+		uint32_t primitive_id, instance_id;
+	};
+	static_assert(sizeof(EmissiveTriangle) == 2 * sizeof(uint32_t));
 
 	using Instance = Scene::Instance;
 
@@ -42,6 +46,9 @@ private:
 	myvk::Ptr<myvk::Buffer> m_vertex_buffer, m_vertex_index_buffer;
 	myvk::Ptr<myvk::Buffer> m_texcoord_buffer, m_texcoord_index_buffer;
 	myvk::Ptr<myvk::Buffer> m_material_buffer, m_material_id_buffer;
+	myvk::Ptr<myvk::Buffer> m_light_buffer, m_light_membership_buffer;
+	std::vector<uint8_t> m_emissive_materials;
+	uint32_t m_light_count{};
 	std::vector<myvk::Ptr<myvk::ImageView>> m_textures;
 	std::vector<Transform> m_transforms;
 	bool m_has_emissive_surfaces{false};
@@ -72,6 +79,7 @@ public:
 	inline const auto &GetTextures() const { return m_textures; }
 	inline bool HasEmissiveSurfaces() const { return m_has_emissive_surfaces; }
 	inline float GetEnvironmentIntensity() const { return m_has_emissive_surfaces ? 0.0f : 10.0f; }
+	inline uint32_t GetLightCount() const { return m_light_count; }
 
 	inline const auto &GetQueuePtr() const { return m_queue_ptr; }
 	inline const myvk::Ptr<myvk::Device> &GetDevicePtr() const final { return m_queue_ptr->GetDevicePtr(); }
@@ -82,6 +90,8 @@ public:
 	inline const auto &GetTexcoordIndexBuffer() const { return m_texcoord_index_buffer; }
 	inline const auto &GetMaterialBuffer() const { return m_material_buffer; }
 	inline const auto &GetMaterialIDBuffer() const { return m_material_id_buffer; }
+	inline const auto &GetLightBuffer() const { return m_light_buffer; }
+	inline const auto &GetLightMembershipBuffer() const { return m_light_membership_buffer; }
 
 	VkDeviceSize GetTransformBufferSize() const;
 	void UpdateTransformBuffer(void *p_mapped) const;

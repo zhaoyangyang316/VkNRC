@@ -2,10 +2,13 @@
 
 layout(input_attachment_index = 0, binding = 0) uniform subpassInput uColor;
 layout(binding = 1, rgba32f) uniform image2D uAccumulate;
+layout(binding = 2, rgba32f) uniform image2DArray uHistory;
 
 layout(location = 0) out vec4 oScreen;
 
-layout(push_constant) uniform uuPushConstant { uint uIsAccumulate, uAccumulateCount; };
+layout(push_constant) uniform uuPushConstant {
+	uint uIsAccumulate, uAccumulateCount, uAccumulationWindow, uHistoryWriteIndex;
+};
 
 vec3 ToneMapFilmic_Hejl2015(in const vec3 hdr, in const float white_pt) {
 	vec4 vh = vec4(hdr, white_pt);
@@ -19,12 +22,25 @@ void main() {
 
 	ivec2 coord = ivec2(gl_FragCoord.xy);
 	if (uIsAccumulate != 0) {
-		if (uAccumulateCount != 0) {
+		if (uAccumulationWindow != 0) {
+			// Recompute from the actual last N samples. This is a finite window,
+			// not an exponential average, and avoids long-running subtraction drift.
+			// During warm-up only [0, count) contains initialized history texels.
+			vec3 sum = color;
+			for (uint layer = 0; layer < uAccumulateCount; ++layer) {
+				if (layer != uHistoryWriteIndex)
+					sum += imageLoad(uHistory, ivec3(coord, int(layer))).rgb;
+			}
+			imageStore(uHistory, ivec3(coord, int(uHistoryWriteIndex)), vec4(color, 0));
+			color = sum / float(min(uAccumulateCount + 1, uAccumulationWindow));
+		} else if (uAccumulateCount != 0) {
 			color += imageLoad(uAccumulate, coord).rgb * float(uAccumulateCount);
 			color /= float(uAccumulateCount + 1);
 		}
-		imageStore(uAccumulate, coord, vec4(color, 0));
 	}
+	// Keep the latest linear frame available for pause/resume even without
+	// accumulation. The display-only graph reads this image without modifying it.
+	imageStore(uAccumulate, coord, vec4(color, 0));
 
 	vec3 screen = pow(ToneMapFilmic_Hejl2015(color, 3.2), vec3(1 / 2.2));
 	oScreen = vec4(screen, 1.0);

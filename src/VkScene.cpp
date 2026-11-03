@@ -4,6 +4,7 @@
 
 #include "VkScene.hpp"
 
+#include <cmath>
 #include <future>
 #include <thread>
 
@@ -72,6 +73,39 @@ void VkScene::UpdateTransformBuffer(void *p_mapped) const {
 
 void VkScene::upload_buffers(const Scene &scene, std::span<const Material> materials) {
 	const auto &device = GetDevicePtr();
+	std::vector<EmissiveTriangle> lights;
+	std::vector<uint32_t> light_membership(scene.GetMaterialIDs().size(), 0u);
+	const auto &vertices = scene.GetVertices();
+	const auto &indices = scene.GetVertexIndices();
+	for (uint32_t instance_id = 0; instance_id < m_instances.size(); ++instance_id) {
+		const auto &instance = m_instances[instance_id];
+		// OBJ instances partition the global triangle/index arrays; this is also
+		// the primitive base used by the visibility buffer and ray-query hits.
+		const uint32_t first_primitive = instance.first_index / 3u;
+		for (uint32_t local_primitive = 0; local_primitive < instance.index_count / 3u; ++local_primitive) {
+			const uint32_t primitive_id = first_primitive + local_primitive;
+			const uint32_t material_id = scene.GetMaterialIDs()[primitive_id];
+			if (material_id >= m_emissive_materials.size() || !m_emissive_materials[material_id])
+				continue;
+			const glm::vec3 &v0 = vertices[indices[primitive_id * 3u]],
+			                &v1 = vertices[indices[primitive_id * 3u + 1u]],
+			                &v2 = vertices[indices[primitive_id * 3u + 2u]];
+			const glm::vec3 area_normal = glm::cross(v1 - v0, v2 - v0);
+			const float squared_area = glm::dot(area_normal, area_normal);
+			if (!(squared_area > 0.0f) || !std::isfinite(squared_area))
+				continue;
+			lights.push_back({primitive_id, instance_id});
+			light_membership[primitive_id] = 1u;
+		}
+	}
+	m_light_count = static_cast<uint32_t>(lights.size());
+	spdlog::info("{} emissive triangles available for direct light sampling", m_light_count);
+	// Vulkan descriptors must refer to nonempty buffers even when specialization
+	// disables light sampling. The dummy entry is never selected with count zero.
+	if (lights.empty())
+		lights.push_back({0u, 0u});
+	if (light_membership.empty())
+		light_membership.push_back(0u);
 
 	auto vertex_staging_buffer =
 	    myvk::Buffer::CreateStaging(device, scene.GetVertices().begin(), scene.GetVertices().end());
@@ -84,6 +118,9 @@ void VkScene::upload_buffers(const Scene &scene, std::span<const Material> mater
 	auto material_id_staging_buffer =
 	    myvk::Buffer::CreateStaging(device, scene.GetMaterialIDs().begin(), scene.GetMaterialIDs().end());
 	auto material_staging_buffer = myvk::Buffer::CreateStaging(device, materials.begin(), materials.end());
+	auto light_staging_buffer = myvk::Buffer::CreateStaging(device, lights.begin(), lights.end());
+	auto light_membership_staging_buffer =
+	    myvk::Buffer::CreateStaging(device, light_membership.begin(), light_membership.end());
 
 	auto command_buffer = myvk::CommandBuffer::Create(myvk::CommandPool::Create(m_queue_ptr));
 	const auto cmd_create_copy = [&]<typename Buffer_T = myvk::Buffer>(
@@ -103,6 +140,12 @@ void VkScene::upload_buffers(const Scene &scene, std::span<const Material> mater
 	cmd_create_copy(texcoord_index_staging_buffer, &m_texcoord_index_buffer, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
 	cmd_create_copy(material_id_staging_buffer, &m_material_id_buffer, 0);
 	cmd_create_copy(material_staging_buffer, &m_material_buffer, 0);
+	cmd_create_copy(light_staging_buffer, &m_light_buffer, 0);
+	cmd_create_copy(light_membership_staging_buffer, &m_light_membership_buffer, 0);
+	command_buffer->CmdPipelineBarrier(
+	    VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, {},
+	    {m_light_buffer->GetMemoryBarrier(VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT),
+	     m_light_membership_buffer->GetMemoryBarrier(VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT)}, {});
 	command_buffer->End();
 
 	auto fence = myvk::Fence::Create(device);
@@ -250,18 +293,21 @@ template <VkScene::TexLoad... Loads> void VkScene::load_textures(const Scene &sc
 		    }(),
 		    ...);
 
-	// Only materials assigned to scene triangles can disable the fallback light.
 	// Match GetSceneEmission: a loaded map_Ke replaces Ke, including an all-black
 	// map. If loading failed, the shader falls back to the constant emission.
+	// Keep these flags for the CPU light table as well as fallback-light detection.
+	m_emissive_materials.resize(scene.GetMaterials().size());
+	for (uint32_t material_id = 0; material_id < m_emissive_materials.size(); ++material_id) {
+		const Material &material = get_material(material_id);
+		m_emissive_materials[material_id] =
+		    material.emission_texture_id == -1u
+		        ? glm::any(glm::greaterThan(material.emission, glm::vec3(0.0f)))
+		        : texture_has_nonzero_rgb[material.emission_texture_id] != 0;
+	}
+	// Only materials assigned to scene triangles can disable the fallback light.
 	m_has_emissive_surfaces = false;
 	for (uint32_t material_id : scene.GetMaterialIDs()) {
-		if (material_id >= scene.GetMaterials().size())
-			continue;
-		const Material &material = get_material(material_id);
-		const bool emissive = material.emission_texture_id == -1u
-		                          ? glm::any(glm::greaterThan(material.emission, glm::vec3(0.0f)))
-		                          : texture_has_nonzero_rgb[material.emission_texture_id] != 0;
-		if (emissive) {
+		if (material_id < m_emissive_materials.size() && m_emissive_materials[material_id]) {
 			m_has_emissive_surfaces = true;
 			break;
 		}

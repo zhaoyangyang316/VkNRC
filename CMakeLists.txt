@@ -33,6 +33,7 @@ add_executable(VkNRC
         src/RenderCapture.cpp
         src/Camera.cpp
         src/Scene.cpp
+        src/SceneCatalog.cpp
         # src/Sobol.cpp
         # src/BlueNoise.cpp
         src/VkScene.cpp
@@ -50,10 +51,21 @@ add_executable(VkNRC
         src/rg/NNGradientShader.cpp
 )
 target_link_libraries(VkNRC PRIVATE dep shader)
+target_compile_definitions(VkNRC PRIVATE VKNRC_ASSET_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 set_target_properties(VkNRC PROPERTIES
         C_VISIBILITY_PRESET hidden
         CXX_VISIBILITY_PRESET hidden
         VISIBILITY_INLINES_HIDDEN ON
 )
 
-install(TARGETS VkNRC RUNTIME DESTINATION)
+install(TARGETS VkNRC RUNTIME DESTINATION .)
+install(DIRECTORY assets/ DESTINATION assets)
+
+# Optional offscreen regression test; build explicitly with --target VkNRCRollingTest.
+add_executable(VkNRCRollingTest EXCLUDE_FROM_ALL
+        test/rolling_accumulation.cpp
+        src/VkNRCState.cpp
+        src/RenderCapture.cpp
+        src/rg/ScreenPass.cpp
+)
+target_link_libraries(VkNRCRollingTest PRIVATE dep shader)

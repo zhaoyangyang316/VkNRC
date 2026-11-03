@@ -20,6 +20,29 @@
 
 namespace rg {
 
+PausedRenderGraph::PausedRenderGraph(const myvk::Ptr<myvk::FrameManager> &frame_manager,
+                                   const myvk::Ptr<myvk::ImageView> &frozen_image)
+    : RenderGraphBase(frame_manager->GetDevicePtr()) {
+	auto frozen = CreateResource<myvk_rg::InputImage>({"frozen"}, frozen_image);
+	// The preceding writer belongs to NRCRenderGraph, so a read-only graph's
+	// kLastFrame inference would not provide the required write-to-read barrier.
+	frozen->SetSyncType(myvk_rg::ExternalSyncType::kCustom);
+	frozen->SetSrcLayout(VK_IMAGE_LAYOUT_GENERAL);
+	frozen->SetDstLayout(VK_IMAGE_LAYOUT_GENERAL);
+	frozen->SetSrcPipelineStages(VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+	frozen->SetSrcAccessFlags(VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+	frozen->SetDstPipelineStages(VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+	frozen->SetDstAccessFlags(VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+
+	auto swapchain_image = CreateResource<myvk_rg::SwapchainImage>({"swapchain_image"}, frame_manager);
+	swapchain_image->SetLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE);
+	auto screen_pass = CreatePass<PausedScreenPass>(
+	    {"paused_screen"}, PausedScreenPass::Args{.frozen_image = frozen->Alias(),
+	                                             .screen_image = swapchain_image->Alias()});
+	auto imgui_pass = CreatePass<myvk_rg::ImGuiPass>({"imgui_pass"}, screen_pass->GetScreenOutput());
+	AddResult({"present"}, imgui_pass->GetImageOutput());
+}
+
 NRCRenderGraph::NRCRenderGraph(const myvk::Ptr<myvk::FrameManager> &frame_manager,
                                const myvk::Ptr<VkSceneTLAS> &scene_tlas_ptr, const myvk::Ptr<VkNRCState> &nrc_state_ptr,
                                const myvk::Ptr<Camera> &camera_ptr)
@@ -85,6 +108,7 @@ NRCRenderGraph::NRCRenderGraph(const myvk::Ptr<myvk::FrameManager> &frame_manage
 	auto screen_pass = CreatePass<ScreenPass>(
 	    {"screen_pass"}, ScreenPass::Args{.nrc_state_ptr = m_nrc_state_ptr,
 	                                      .accumulate_image = nrc_resources.accumulate,
+	                                      .history_image = nrc_resources.history,
 	                                      .color_image = nn_inference_pass->Get()->GetColorOutput(),
 	                                      .screen_image = swapchain_image->Alias()});
 	auto imgui_pass = CreatePass<myvk_rg::ImGuiPass>({"imgui_pass"}, screen_pass->GetScreenOutput());
@@ -101,6 +125,7 @@ void NRCRenderGraph::PreExecute() const {
 	// Update Externals
 	GetResource<myvk_rg::AccelerationStructure>({"tlas"})->SetAS(m_scene_tlas_ptr->GetTLAS());
 	GetResource<myvk_rg::InputImage>({"accumulate"})->SetVkImageView(m_nrc_state_ptr->GetAccumulateImageView());
+	GetResource<myvk_rg::InputImage>({"history"})->SetVkImageView(m_nrc_state_ptr->GetHistoryImageView());
 	GetResource<myvk_rg::InputBuffer>({"weights"})->SetBufferView(m_nrc_state_ptr->GetWeightBuffer());
 	GetResource<myvk_rg::InputBuffer>({"use_weights"})->SetBufferView(m_nrc_state_ptr->GetUseWeightBuffer());
 	GetResource<myvk_rg::InputBuffer>({"optimizer_state"})->SetBufferView(m_nrc_state_ptr->GetOptimizerStateBuffer());
@@ -129,6 +154,9 @@ SceneResources NRCRenderGraph::create_scene_resources() {
 	    .material_ids =
 	        CreateResource<myvk_rg::InputBuffer>({"material_ids"}, m_scene_ptr->GetMaterialIDBuffer())->Alias(),
 	    .transforms = transform_buffer->Alias(),
+	    .lights = CreateResource<myvk_rg::InputBuffer>({"lights"}, m_scene_ptr->GetLightBuffer())->Alias(),
+	    .light_membership =
+	        CreateResource<myvk_rg::InputBuffer>({"light_membership"}, m_scene_ptr->GetLightMembershipBuffer())->Alias(),
 	    .texture_sampler = myvk::Sampler::Create(GetDevicePtr(), VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT),
 	};
 	for (uint32_t tex_id = 0; const auto &texture : m_scene_ptr->GetTextures())
@@ -157,6 +185,7 @@ NRCResources NRCRenderGraph::create_nrc_resources() {
 	NRCResources nr = {
 	    .accumulate =
 	        CreateResource<myvk_rg::InputImage>({"accumulate"}, m_nrc_state_ptr->GetAccumulateImageView())->Alias(),
+	    .history = CreateResource<myvk_rg::InputImage>({"history"}, m_nrc_state_ptr->GetHistoryImageView())->Alias(),
 	    .weights = CreateResource<myvk_rg::InputBuffer>({"weights"}, m_nrc_state_ptr->GetWeightBuffer())->Alias(),
 	    .use_weights =
 	        CreateResource<myvk_rg::InputBuffer>({"use_weights"}, m_nrc_state_ptr->GetUseWeightBuffer())->Alias(),

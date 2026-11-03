@@ -33,6 +33,15 @@ public:
 	void PreExecute() const final;
 };
 
+// Draw a retained frame and the live UI without tracing or updating the cache.
+// The image view is retained across viewport changes while rendering is paused.
+class PausedRenderGraph final : public myvk_rg::RenderGraphBase {
+public:
+	PausedRenderGraph(const myvk::Ptr<myvk::FrameManager> &frame_manager,
+	                  const myvk::Ptr<myvk::ImageView> &frozen_image);
+	~PausedRenderGraph() final = default;
+};
+
 } // namespace rg
 
 #endif

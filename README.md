@@ -43,18 +43,18 @@ numerical validation of the neural cache or a performance benchmark.
 
 ## Try the demo
 
-Double-click `run-demo.cmd` to open the included Cornell box, using
+Double-click `build/Release/VkNRC.exe` or `run-demo.cmd` to open the included Cornell box, using
 [Cornell's measured geometry and camera](https://bowers.cornell.edu/computer-graphics/data).
 The room is nearly cubic, with rotated short/tall blocks and an emissive ceiling
 panel. RGB materials approximate the reference's spectral reflectances. No external
 textures or downloads are needed. Landscape windows show margins beside the square
 box; the geometry is not stretched to fill the window.
 
-The launcher places the camera outside the opening with the reference vertical
-field of view. To launch that view directly:
+No command-line arguments are needed. The application places the camera outside
+the opening with the reference vertical field of view:
 
 ```powershell
-.\build\Release\VkNRC.exe .\assets\cornell-box\cornell-box.obj --camera 0 -0.005007153 3.86123033 --fov 39.30765
+.\build\Release\VkNRC.exe
 ```
 
 To use another scene, pass an OBJ path:
@@ -63,10 +63,20 @@ To use another scene, pass an OBJ path:
 .\run-demo.cmd "C:\path\to\scene.obj"
 ```
 
+The **Scene** dropdown lists OBJ files recursively under `assets`, plus a custom
+scene supplied on the command line. Cornell is currently the only bundled scene;
+place additional OBJ/MTL files and their textures under `assets` before starting
+to add them to the list. Selecting a scene resets its camera, network and
+accumulation, unlocks training, and resumes rendering. A failed load keeps the
+previous scene and shows an error. Assets are located relative to the executable
+(including the repository above `build/Release`), with the configured source path
+as a fallback, so launching from another working directory works. CMake installation
+also includes the assets beside the executable.
+
 The OBJ must reference a valid MTL and assign a material to every face. Either
 provide valid UVs for every face or omit UVs entirely. The loader centers and
-rescales geometry to a maximum extent of 2 units. Without camera options the camera
-starts at the origin looking toward negative Z; large imported scenes may start
+rescales geometry to a maximum extent of 2 units. For custom scenes, without camera
+options the camera starts at the origin looking toward negative Z; large imported scenes may start
 with the camera inside geometry. `--camera x y z` sets its position in normalized
 scene coordinates, and `--fov degrees` sets the vertical field of view.
 
@@ -77,11 +87,43 @@ texture with any nonzero RGB texel counts as emissive, a black texture does not,
 and a failed texture load falls back to `Ke`. Unused materials do not affect this
 decision. The chosen environment intensity is printed at startup. With the Cornell
 box, illumination comes from the ceiling panel and the background is black.
-Plain path tracing will be noisy without accumulation because the renderer samples
-the small ceiling light through BSDF rays; it has no explicit light-sampling pass.
+Next event estimation (NEE) is enabled by default. At each continued surface vertex,
+the renderer samples an emissive triangle and traces a shadow ray to it. Power-heuristic
+multiple importance sampling (MIS) combines this estimate with BRDF-sampled emitter
+hits. Scenes without emitters instead sample the constant environment. This applies
+to both plain path tracing and NRC training; indirect illumination still benefits
+from accumulation or the cache.
 
 Controls:
 
+- **Next event estimation:** toggle explicit direct-light sampling with MIS. Changing
+  it resets accumulation and retrains the cache, while preserving the accumulation window. Use
+  `--no-nee` to disable it from the command line, including in `--compare` mode.
+- **Pause rendering / Resume rendering:** freeze the image, path tracing, cache
+  training and sample count while keeping the UI responsive. Camera and rendering
+  settings are inactive until resumed. Resizing displays the frozen image with its
+  original aspect ratio and resets accumulation for the next rendered frame.
+- **Max bounces:** set the trace limit from 1 to 64 (default 64). Changing it resets
+  accumulation and retrains the cache. It counts explicitly traced surface vertices,
+  including the primary hit; 1 shows only directly visible emission/background.
+  NRC may still represent additional transport through an earlier cache query,
+  because the network is not conditioned on remaining depth. The same limit is
+  available as `--max-bounces 8` on the command line.
+- **Accumulate last:** a positive value averages the latest N samples per pixel
+  while rendering and training keep running. For 4, frame 5 averages samples 2–5,
+  frame 6 averages samples 3–6, and so on. During startup it averages the samples
+  collected so far. This is a finite sliding window, not an exponential average.
+  **0** averages all samples since the last reset (when **Accumulate** is enabled).
+  Changing the window or clicking **Restart accumulation** clears sample history
+  while preserving the trained cache. Camera, scene, viewport and rendering-setting
+  changes also clear history. **Accumulate** off shows only the current sample;
+  turning it back on starts a fresh history with the selected window.
+  Use `--accumulate-last 4` (or the compatibility alias `--max-spp 4`) to start
+  with a four-sample window. In diagnostic `--compare` mode, `--samples` sets how
+  many frames each method renders; the final capture averages the selected window
+  (or all those frames if the window is 0).
+  Stored history is limited to 64 samples and 1 GiB, so the maximum decreases
+  with resolution (64 at 1280×720, 32 at 1920×1080, 8 at 3840×2160).
 - **W/A/S/D:** move; **Space / Left Shift:** up / down.
 - **Hold left mouse and drag:** look around. Click outside the panel if camera
   movement is blocked by UI focus.
@@ -93,9 +135,21 @@ Controls:
   training; **Train 1-Frame** advances a locked network; **Re-Train** resets it.
 
 For a stationary comparison, first let the network train, then enable **Lock** and
-**Accumulate**. Lock resets the accumulation so earlier learning transients do not
-remain in the comparison. NRC is an approximation and will retain some bias even
+set **Accumulate last** to a small value such as 1, 4 or 8. Set the two view methods to
+`None` and `NRC` to compare them at the same sample count. The window keeps advancing;
+use **Pause rendering** to freeze an image for inspection. **Restart accumulation**
+clears the window while keeping the trained weights. Lock resets the
+accumulation so earlier learning transients do not remain in the comparison.
+NRC is an approximation and will retain some bias even
 with many accumulated samples; SPP reduces sampling noise, not cache error.
+
+The rolling-window regression test runs the actual display shader on synthetic
+radiance frames and checks GPU readback against a CPU average of the last N frames:
+
+```powershell
+cmake --build build --config Release --target VkNRCRollingTest --parallel 8
+.\build\Release\VkNRCRollingTest.exe .\build\rolling-validation --validation
+```
 
 ## Repeatable radiance comparison
 
@@ -112,13 +166,21 @@ can still cause small training differences between runs with the same seed.
 Outputs are `build/comparison/nrc.pfm` and `build/comparison/path-tracing.pfm`.
 The program exits after capture. Use an empty output directory to retain old runs.
 
-Local checks with seeds 1337, 42 and 2026, 8192 training frames and 4096 samples per
-capture produced finite images. Across shaded pixels (reference luminance >0.005,
-maximum RGB <5, excluding the background and direct emitter), mean NRC luminance
-ranged from 3.6% below to 1.3% above plain path tracing. Relative luminance MAE was
-7.2–7.6%; this includes residual cache bias and reference sampling noise. These
-checks did not reproduce the reported severe dark regions and do not establish
-their exact cause.
+To compare NEE on/off, repeat the command with `--no-nee` and a different output
+directory. A local Cornell check with seed 1337 measured 8-SPP plain-tracer
+luminance RMSE of 0.2315 without NEE and 0.0213 with NEE, against a 4096-SPP NEE
+reference (about 10.9 times lower error). The two 4096-SPP plain-tracer captures
+differed in mean luminance by 0.015%. After 8192 training frames, NRC's mean
+luminance was 0.16% below the NEE path tracer. These measurements use shaded pixels
+(reference luminance >0.005, maximum RGB <5), excluding background and visible
+emitters; they are one scene/seed check, not a general error bound or timing claim.
+
+Additional checks covered constant/textured emitters, black and missing emission
+maps, directly visible emission at depth one, and diffuse/glossy environment-only
+scenes. An unoccluded diffuse plane with reflectance 0.7 under environment 10
+matched the analytic RGB value (7,7,7) to within 1.2e-5. Shader validation and the
+Vulkan validation-layer smoke run passed. Random samples use [0,1) to avoid
+zero-PDF endpoints, and acceleration-structure buffers include device-address usage.
 
 ## Source guide
 
@@ -133,7 +195,8 @@ This implementation's main components are:
 | --- | --- |
 | `src/main.cpp` | Device setup, scene loading, render loop and controls |
 | `src/rg/NRCRenderGraph.cpp` | Visibility → tracing → inference → training → display |
-| `shader/src/path_tracer.comp` | Short rendering paths, extended training paths and cache queries |
+| `shader/src/path_tracer.comp` | NEE/MIS, short rendering paths, extended training paths and cache queries |
+| `src/VkScene.cpp` | Scene upload and emissive-triangle table, including emission texture handling |
 | `shader/src/NRCRecord.glsl` | Encoded position, direction, normal, roughness and reflectance inputs |
 | `shader/src/NN_nv.glsl` | Fused FP16 cooperative-matrix neural network operations |
 | `shader/src/nrc_gradient.comp` | Backpropagation through five 64-wide hidden layers |
@@ -148,13 +211,22 @@ sixteen training paths uses traced transport with Russian roulette rather than a
 cache endpoint; bootstrap endpoints are not used as their own labels. The
 path-spread heuristic uses the preceding sample's PDF and the incoming cosine.
 
+The cache represents scattered radiance including direct lighting. Cache endpoints
+therefore skip local NEE; continuing paths include it in both the displayed result
+and training targets. MIS weights apply to emitted radiance reached by a BRDF ray,
+not to the scattered-radiance cache prediction. Triangle selection is uniform,
+followed by uniform area sampling; PDFs use transformed world-space areas and the
+existing two-sided emission convention. Emission textures are evaluated at sampled
+UVs. The direct-light estimator follows the light/BSDF sampling approach described
+in [PBRT's path tracer](https://pbr-book.org/4ed/Light_Transport_I_Surface_Reflection/A_Better_Path_Tracer).
+
 The neural shaders synchronize cooperative output stores before shared-memory
 reads, zero padded inputs, and discard nonfinite prediction channels before
 compositing. FP16 backpropagation uses a loss scale of 1/128, reversed in the FP32
 optimizer, to reduce overflow risk with bright area lights.
 
 The renderer is simplified: plain tracing and reference training paths use Russian
-roulette with a 64-vertex safety cap, which leaves a small truncation bias. There
+roulette with a configurable vertex cap (64 by default), which leaves a truncation bias. There
 is a fallback white environment for scenes without emitters, with no ReSTIR,
-next-event light sampling or adaptive training tiles. Its images and timings
+power-weighted light selection or adaptive training tiles. Its images and timings
 should not be treated as a full reproduction of the paper's renderer.

@@ -4,6 +4,7 @@
 
 #include "PathTracerPass.hpp"
 
+#include <cstddef>
 #include <spdlog/spdlog.h>
 
 namespace rg {
@@ -18,7 +19,12 @@ struct PushConstant_Data {
 	alignas(sizeof(VkExtent2D)) VkExtent2D extent;
 	uint32_t left_method, right_method;
 	float train_probability;
+	uint32_t max_bounces;
+	uint32_t use_nee;
 };
+static_assert(offsetof(PushConstant_Data, max_bounces) == 84);
+static_assert(offsetof(PushConstant_Data, use_nee) == 88);
+static_assert(sizeof(PushConstant_Data) == 96);
 } // namespace path_tracer_pass
 using path_tracer_pass::PushConstant_Data;
 
@@ -68,6 +74,10 @@ PathTracerPass::PathTracerPass(myvk_rg::Parent parent, const PathTracerPass::Arg
 	    CreateResource<myvk_rg::ManagedImage>({"bias_factor_r"}, VK_FORMAT_R32G32B32A32_SFLOAT)->Alias());
 	AddDescriptorInput<myvk_rg::Usage::kStorageImageW, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT>(
 	    {17}, {"factor_gb"}, CreateResource<myvk_rg::ManagedImage>({"factor_gb"}, VK_FORMAT_R32G32_SFLOAT)->Alias());
+	AddDescriptorInput<myvk_rg::Usage::kStorageBufferR, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT>(
+	    {18}, {"lights"}, args.scene_resources.lights);
+	AddDescriptorInput<myvk_rg::Usage::kStorageBufferR, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT>(
+	    {19}, {"light_membership"}, args.scene_resources.light_membership);
 }
 
 myvk::Ptr<myvk::ComputePipeline> PathTracerPass::CreatePipeline() const {
@@ -80,6 +90,7 @@ myvk::Ptr<myvk::ComputePipeline> PathTracerPass::CreatePipeline() const {
 	auto shader_module = myvk::ShaderModule::Create(device, kCompSpv, sizeof(kCompSpv));
 	shader_module->AddSpecialization(0, (uint32_t)m_scene_ptr->GetTextures().size());
 	shader_module->AddSpecialization(1, m_scene_ptr->GetEnvironmentIntensity());
+	shader_module->AddSpecialization(2, m_scene_ptr->GetLightCount());
 	return myvk::ComputePipeline::Create(pipeline_layout, shader_module);
 }
 
@@ -98,6 +109,8 @@ void PathTracerPass::CmdExecute(const myvk::Ptr<myvk::CommandBuffer> &command_bu
 		    .left_method = static_cast<uint32_t>(m_nrc_state_ptr->GetLeftMethod()),
 		    .right_method = static_cast<uint32_t>(m_nrc_state_ptr->GetRightMethod()),
 		    .train_probability = m_nrc_state_ptr->GetTrainProbability(),
+		    .max_bounces = m_nrc_state_ptr->GetMaxBounces(),
+		    .use_nee = m_nrc_state_ptr->IsUseNEE(),
 		};
 	}
 	command_buffer->CmdBindPipeline(GetVkPipeline());

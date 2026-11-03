@@ -33,6 +33,8 @@ layout(push_constant) uniform uuPushConstant {
 	uvec2 uExtent;
 	uint uLeftMethod, uRightMethod;
 	float uTrainProbability;
+	uint uMaxBounces;
+	uint uUseNEE;
 };
 
 // V-Buffer
@@ -47,6 +49,12 @@ uBatchTrainRecords[NRC_TRAIN_BATCH_COUNT];
 
 layout(binding = 16, rgba32f) writeonly uniform image2D uBias_FactorR;
 layout(binding = 17, rg32f) writeonly uniform image2D uFactorGB;
+
+// Uniform selection of emissive triangles, followed by uniform surface-area
+// sampling. The second buffer allows constant-time PDF evaluation on BSDF hits.
+layout(constant_id = 2) const uint kLightCount = 0;
+layout(std430, binding = 18) readonly buffer uuLights { uvec2 uLights[]; };
+layout(std430, binding = 19) readonly buffer uuLightMembership { uint uLightMembership[]; };
 
 struct Ray {
 	vec3 o, d;
@@ -204,6 +212,103 @@ BRDFStepInfo BRDFQuery(in const Hit hit, in const Ray ray, in const vec3 dir) {
 	return info;
 }
 
+float PowerMIS(float sampled_pdf, float other_pdf) {
+	// Scale before squaring to avoid overflow for small or nearly edge-on lights.
+	if (!(sampled_pdf > 0.0))
+		return 0.0;
+	if (!(other_pdf > 0.0))
+		return 1.0;
+	if (isinf(sampled_pdf))
+		return isinf(other_pdf) ? 0.5 : 1.0;
+	if (isinf(other_pdf))
+		return 0.0;
+	float scale = max(sampled_pdf, other_pdf);
+	float a = sampled_pdf / scale, b = other_pdf / scale;
+	return a * a / (a * a + b * b);
+}
+
+float TriangleLightPDF(in const uint primitive_id, in const uint instance_id,
+                       in const vec3 origin, in const vec3 point) {
+	if (kLightCount == 0 || uLightMembership[primitive_id] == 0)
+		return 0.0;
+	vec3 a = GetSceneVertex(instance_id, primitive_id, 0);
+	vec3 b = GetSceneVertex(instance_id, primitive_id, 1);
+	vec3 c = GetSceneVertex(instance_id, primitive_id, 2);
+	vec3 area_normal = cross(b - a, c - a);
+	float twice_area = length(area_normal);
+	vec3 delta = point - origin;
+	float distance2 = dot(delta, delta);
+	if (!(twice_area > 0.0) || !(distance2 > 0.0))
+		return 0.0;
+	// Emission is two-sided in GetSceneEmission and on ordinary path hits.
+	float light_cosine = abs(dot(area_normal / twice_area, delta * inversesqrt(distance2)));
+	if (!(light_cosine > 0.0))
+		return 0.0;
+	return 2.0 * distance2 / (float(kLightCount) * twice_area * light_cosine);
+}
+
+bool ShadowVisible(in const vec3 origin, in const vec3 direction, in const float distance) {
+	rayQueryEXT shadow;
+	rayQueryInitializeEXT(shadow, uTLAS, gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT,
+	                      0xFF, origin, T_MIN, direction, distance);
+	while (rayQueryProceedEXT(shadow))
+		;
+	return rayQueryGetIntersectionTypeEXT(shadow, true) == gl_RayQueryCommittedIntersectionNoneEXT;
+}
+
+vec3 SampleDirectLight(in const Hit hit, in const Ray incoming_ray) {
+	if (uUseNEE == 0)
+		return vec3(0);
+	vec3 direction, emission;
+	float light_pdf, shadow_distance;
+	if (kLightCount != 0) {
+		// Guard the discrete index against rounding when converting the count.
+		uvec2 light = uLights[min(uint(RNGNext() * float(kLightCount)), kLightCount - 1u)];
+		float r = sqrt(RNGNext()), s = RNGNext();
+		vec3 barycentric = vec3(1.0 - r, r * (1.0 - s), r * s);
+		vec3 point = GetSceneVertex(light.y, light.x, 0) * barycentric.x +
+		             GetSceneVertex(light.y, light.x, 1) * barycentric.y +
+		             GetSceneVertex(light.y, light.x, 2) * barycentric.z;
+		vec3 delta = point - hit.position;
+		float distance = length(delta);
+		if (!(distance > 2.0 * T_MIN) || distance > T_MAX)
+			return vec3(0);
+		direction = delta / distance;
+		light_pdf = TriangleLightPDF(light.x, light.y, hit.position, point);
+		vec2 uv = GetSceneTexcoord(light.x, 0) * barycentric.x +
+		          GetSceneTexcoord(light.x, 1) * barycentric.y +
+		          GetSceneTexcoord(light.x, 2) * barycentric.z;
+		emission = GetSceneEmission(GetSceneMaterial(light.x), uv);
+		// Exclude the sampled endpoint itself from the visibility test. The
+		// relative margin covers floating-point intersection error in this scene.
+		shadow_distance = distance - max(2.0 * T_MIN, distance * 1e-5);
+		if (shadow_distance <= T_MIN)
+			return vec3(0);
+	} else if (kEnvironmentIntensity > 0.0) {
+		// The fallback environment is constant, so cosine-hemisphere sampling
+		// is effective and its PDF is also available for BSDF escape rays.
+		vec4 sample_dir_pdf = SampleCosineWeighted(hit.normal);
+		direction = sample_dir_pdf.xyz;
+		light_pdf = sample_dir_pdf.w;
+		emission = kConstLight;
+		shadow_distance = T_MAX;
+	} else {
+		return vec3(0);
+	}
+
+	float cosine = dot(hit.normal, direction);
+	if (!(cosine > 0.0) || !(light_pdf > 0.0) || isinf(light_pdf) ||
+	    !any(greaterThan(emission, vec3(0))))
+		return vec3(0);
+	CookTorranceBRDFArgs args = GetHitBRDFArgs(hit);
+	float brdf_pdf = CookTorrancePDF(args, direction, -incoming_ray.d, hit.normal);
+	vec3 direct = CookTorranceBRDF(args, direction, -incoming_ray.d, hit.normal) * emission *
+	              (cosine * PowerMIS(light_pdf, brdf_pdf) / light_pdf);
+	if (!any(greaterThan(direct, vec3(0))) || !ShadowVisible(hit.position, direction, shadow_distance))
+		return vec3(0);
+	return NormalizeRGB(direct);
+}
+
 struct PathTraceResult {
 	vec3 bias, factor;
 };
@@ -226,8 +331,8 @@ PathTraceResult TracePath(Hit hit, Ray ray, in const uint method, in const bool 
 	bool train_active = train, render_active = true, bootstrap = false;
 	PackedNRCInput bootstrap_input;
 	// Anchor 1/16 of training paths with actual traced transport instead of a
-	// learned terminal value. Roulette ends these paths; the common 64-vertex
-	// safety cap also applies to the plain path tracer (a small residual bias).
+	// learned terminal value. Roulette ends these paths; the common trace limit
+	// also applies to the plain path tracer (64 vertices by default).
 	bool unbiased_training = train && RNGNext() < (1.0 / 16.0);
 
 	vec3 radiance = vec3(0), render_weight = vec3(1), path_weight = vec3(1);
@@ -237,16 +342,24 @@ PathTraceResult TracePath(Hit hit, Ray ray, in const uint method, in const bool 
 	float threshold = C * primary_spread;
 	float spread_sum = 0.0, suffix_spread_sum = 0.0;
 	bool suffix_started = false;
+	uint max_bounces = clamp(uMaxBounces, 1u, uint(MAX_BOUNCE));
+	float emission_mis = 1.0; // Directly visible emitters have no competing NEE sample.
 
-	for (uint vertex = 0; vertex < MAX_BOUNCE; ++vertex) {
+	for (uint vertex = 0; vertex < max_bounces; ++vertex) {
 		// Emission at this vertex contributes to preceding vertices, but not to
 		// the scattered-radiance target stored at this vertex itself.
 		if (render_active)
-			radiance += render_weight * hit.emission;
+			radiance += render_weight * hit.emission * emission_mis;
 		if (train_active) {
 			for (uint i = 0; i < train_count; ++i)
-				train_bias[i] += train_factor[i] * hit.emission;
+				train_bias[i] += train_factor[i] * hit.emission * emission_mis;
 		}
+		// Count the primary surface as vertex one. At the limit retain its
+		// emission but do not append any cache contribution or training bootstrap.
+		// Earlier cache queries can still summarize additional transport because
+		// remaining depth is not an input to the network.
+		if (vertex + 1 == max_bounces)
+			break;
 
 		bool nrc_endpoint = spread_sum * spread_sum > threshold;
 		if (render_active && (method == METHOD_CACHE || (method == METHOD_NRC && nrc_endpoint))) {
@@ -270,14 +383,23 @@ PathTraceResult TracePath(Hit hit, Ray ray, in const uint method, in const bool 
 		}
 		if (!render_active && !train_active)
 			break;
-		if (vertex + 1 == MAX_BOUNCE)
-			break;
-
 		if (train_active && train_count < MAX_TRAIN_RECORDS) {
 			train_input[train_count] = MakeNRCInput(hit, -ray.d);
 			train_bias[train_count] = vec3(0);
 			train_factor[train_count] = vec3(1);
 			++train_count;
+		}
+
+		// Cache endpoints above represent the entire scattered radiance at that
+		// vertex, including direct light. Only continuing estimators add NEE here.
+		// Include the newly created record: direct illumination is part of S_i,
+		// whereas local emission (added before record creation) is not.
+		vec3 direct = SampleDirectLight(hit, ray);
+		if (render_active)
+			radiance += render_weight * direct;
+		if (train_active) {
+			for (uint i = 0; i < train_count; ++i)
+				train_bias[i] += train_factor[i] * direct;
 		}
 
 		BRDFStepInfo step = BRDFStep(hit, ray);
@@ -306,15 +428,23 @@ PathTraceResult TracePath(Hit hit, Ray ray, in const uint method, in const bool 
 		while (rayQueryProceedEXT(ray_query))
 			;
 		if (rayQueryGetIntersectionTypeEXT(ray_query, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
+			float environment_mis = uUseNEE != 0 && kEnvironmentIntensity > 0.0 && kLightCount == 0
+			                            ? PowerMIS(step.pdf, max(dot(hit.normal, ray.d), 0.0) / M_PI)
+			                            : 1.0;
 			if (render_active)
-				radiance += render_weight * kConstLight;
+				radiance += render_weight * kConstLight * environment_mis;
 			if (train_active) {
 				for (uint i = 0; i < train_count; ++i)
-					train_bias[i] += train_factor[i] * kConstLight;
+					train_bias[i] += train_factor[i] * kConstLight * environment_mis;
 			}
 			break;
 		}
 		hit = GetRayQueryHit(ray_query, ray);
+		// Balance only the emitter hit against NEE at its predecessor. A cache
+		// prediction at this hit is a separate scattered-radiance contribution.
+		emission_mis = uUseNEE != 0
+		                   ? PowerMIS(step.pdf, TriangleLightPDF(hit.primitive_id, hit.instance_id, ray.o, hit.position))
+		                   : 1.0;
 		// Eq. 3 uses the predecessor's sampled-direction PDF and the arriving
 		// ray's cosine at this vertex, not a new sample at the current vertex.
 		float arrival_cosine = abs(dot(hit.normal, -ray.d));

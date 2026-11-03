@@ -6,6 +6,8 @@
 
 #include <array>
 #include <myvk/CommandBuffer.hpp>
+#include <spdlog/spdlog.h>
+#include <stdexcept>
 
 namespace nrc {
 
@@ -30,6 +32,28 @@ struct OptimizerEntry {
 	float m, v, weight, ema_weight;
 };
 } // namespace nrc
+
+namespace {
+bool InitializeStorageLayouts(const myvk::Ptr<myvk::Queue> &queue,
+                              std::initializer_list<myvk::Ptr<myvk::ImageView>> views) {
+	auto pool = myvk::CommandPool::Create(queue);
+	if (!pool)
+		return false;
+	auto command_buffer = myvk::CommandBuffer::Create(pool);
+	if (!command_buffer || command_buffer->Begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT) != VK_SUCCESS)
+		return false;
+	std::vector<VkImageMemoryBarrier> barriers;
+	for (const auto &view : views)
+		barriers.push_back(view->GetMemoryBarrier(VK_IMAGE_ASPECT_COLOR_BIT, 0, 0,
+		                                         VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL));
+	command_buffer->CmdPipelineBarrier(VK_PIPELINE_STAGE_NONE, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+	                                   {}, {}, barriers);
+	if (command_buffer->End() != VK_SUCCESS)
+		return false;
+	auto fence = myvk::Fence::Create(queue->GetDevicePtr());
+	return fence && command_buffer->Submit(fence) == VK_SUCCESS && fence->Wait() == VK_SUCCESS;
+}
+} // namespace
 
 VkDeviceSize VkNRCState::GetEvalRecordBufferSize(VkExtent2D extent) {
 	return (extent.width * extent.height + kTrainBatchSize * kTrainBatchCount) * sizeof(nrc::NRCEvalRecord);
@@ -87,19 +111,67 @@ void VkNRCState::ResetMLPBuffers() {
 	fence->Wait();
 }
 
+uint32_t VkNRCState::max_accumulation_window(VkExtent2D extent) const {
+	constexpr VkDeviceSize kHistoryBudget = VkDeviceSize{1} << 30;
+	constexpr uint32_t kMaxHistoryLayers = 64;
+	const VkDeviceSize bytes_per_layer = VkDeviceSize{std::max(extent.width, 1u)} *
+	                                     std::max(extent.height, 1u) * 4u * sizeof(float);
+	const uint32_t budget_layers = static_cast<uint32_t>(kHistoryBudget / bytes_per_layer);
+	const uint32_t device_layers =
+	    GetDevicePtr()->GetPhysicalDevicePtr()->GetProperties().vk10.limits.maxImageArrayLayers;
+	return std::max(1u, std::min({kMaxHistoryLayers, budget_layers, device_layers}));
+}
+
+myvk::Ptr<myvk::ImageView> VkNRCState::create_history_view(VkExtent2D extent, uint32_t window) const {
+	const VkExtent2D history_extent = window == 0 ? VkExtent2D{1, 1} : extent;
+	auto image = myvk::Image::CreateTexture2DArray(GetDevicePtr(), history_extent, std::max(window, 1u), 1,
+	                                             VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_USAGE_STORAGE_BIT);
+	return image ? myvk::ImageView::Create(image, VK_IMAGE_VIEW_TYPE_2D_ARRAY) : nullptr;
+}
+
+bool VkNRCState::SetAccumulationWindow(uint32_t window) {
+	const uint32_t requested = window;
+	window = std::min(window, GetMaxAccumulationWindow());
+	if (window != requested)
+		spdlog::warn("Accumulation window limited to {} samples at {} x {}", window,
+		             m_accumulate_extent.width, m_accumulate_extent.height);
+	if (window == m_accumulation_window)
+		return false;
+	auto history = create_history_view(m_accumulate_extent, window);
+	if (!history || !InitializeStorageLayouts(m_queue_ptr, {history})) {
+		spdlog::error("Cannot allocate accumulation history for {} samples; keeping {}", window,
+		              m_accumulation_window);
+		return false;
+	}
+	m_history_view = std::move(history);
+	m_accumulation_window = window;
+	ResetAccumulateCount();
+	return true;
+}
+
 void VkNRCState::ResetAccumulateImage(VkExtent2D extent) {
+	if (extent.width == 0 || extent.height == 0)
+		return;
+	uint32_t window = std::min(m_accumulation_window, max_accumulation_window(extent));
+	if (window != m_accumulation_window)
+		spdlog::warn("Resize limits accumulation window to {} samples at {} x {}", window,
+		             extent.width, extent.height);
 	auto image = myvk::Image::CreateTexture2D(GetDevicePtr(), extent, 1, VK_FORMAT_R32G32B32A32_SFLOAT,
 	                                          VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
-	m_accumulate_view = myvk::ImageView::Create(image, VK_IMAGE_VIEW_TYPE_2D);
-
-	auto command_buffer = myvk::CommandBuffer::Create(myvk::CommandPool::Create(m_queue_ptr));
-	command_buffer->Begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-	command_buffer->CmdPipelineBarrier(
-	    VK_PIPELINE_STAGE_NONE, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, {}, {},
-	    {image->GetMemoryBarrier(VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL)});
-	command_buffer->End();
-
-	auto fence = myvk::Fence::Create(GetDevicePtr());
-	command_buffer->Submit(fence);
-	fence->Wait();
+	auto accumulate = image ? myvk::ImageView::Create(image, VK_IMAGE_VIEW_TYPE_2D) : nullptr;
+	if (!accumulate)
+		throw std::runtime_error("Cannot allocate accumulation image");
+	auto history = create_history_view(extent, window);
+	if (!history && window != 0) {
+		spdlog::error("Cannot allocate resized accumulation history; using all-sample accumulation");
+		window = 0;
+		history = create_history_view(extent, window);
+	}
+	if (!history || !InitializeStorageLayouts(m_queue_ptr, {accumulate, history}))
+		throw std::runtime_error("Cannot initialize accumulation images");
+	m_accumulate_view = std::move(accumulate);
+	m_history_view = std::move(history);
+	m_accumulate_extent = extent;
+	m_accumulation_window = window;
+	ResetAccumulateCount();
 }
