@@ -70,6 +70,7 @@ public:
 	inline void SetTrainProbability(float train_probability) { m_train_probability = train_probability; }
 
 	inline uint32_t GetSeed() const { return m_seed; }
+	inline void SetRandomSeed(uint32_t seed) { m_rng.seed(seed); m_seed = seed; }
 
 	inline void NextFrame() {
 		if (m_accumulate)

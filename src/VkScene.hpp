@@ -44,6 +44,7 @@ private:
 	myvk::Ptr<myvk::Buffer> m_material_buffer, m_material_id_buffer;
 	std::vector<myvk::Ptr<myvk::ImageView>> m_textures;
 	std::vector<Transform> m_transforms;
+	bool m_has_emissive_surfaces{false};
 
 	struct TexLoad {
 		std::filesystem::path Scene::Material::*p_path;
@@ -69,6 +70,8 @@ public:
 	VkTransformMatrixKHR GetVkTransform(uint32_t instance_id) const;
 
 	inline const auto &GetTextures() const { return m_textures; }
+	inline bool HasEmissiveSurfaces() const { return m_has_emissive_surfaces; }
+	inline float GetEnvironmentIntensity() const { return m_has_emissive_surfaces ? 0.0f : 10.0f; }
 
 	inline const auto &GetQueuePtr() const { return m_queue_ptr; }
 	inline const myvk::Ptr<myvk::Device> &GetDevicePtr() const final { return m_queue_ptr->GetDevicePtr(); }

@@ -30,6 +30,7 @@ add_subdirectory(shader)
 
 add_executable(VkNRC
         src/main.cpp
+        src/RenderCapture.cpp
         src/Camera.cpp
         src/Scene.cpp
         # src/Sobol.cpp

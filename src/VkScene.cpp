@@ -156,6 +156,8 @@ template <VkScene::TexLoad... Loads> void VkScene::load_textures(const Scene &sc
 		    ...);
 
 	std::vector<uint32_t> path_id_texture_ids(paths.size());
+	// Separate bytes allow texture-loading workers to write distinct entries safely.
+	std::vector<uint8_t> texture_has_nonzero_rgb(paths.size(), 0);
 
 	m_textures.resize(paths.size());
 
@@ -179,14 +181,20 @@ template <VkScene::TexLoad... Loads> void VkScene::load_textures(const Scene &sc
 				path_id_texture_ids[path_id] = -1;
 				continue;
 			}
+			// Assign TextureID
+			uint32_t texture_id = atomic_texture_id.fetch_add(1, std::memory_order_relaxed);
+			path_id_texture_ids[path_id] = texture_id;
+			for (std::size_t pixel = 0, count = std::size_t(width) * height; pixel < count; ++pixel) {
+				if (data[pixel * 4] || data[pixel * 4 + 1] || data[pixel * 4 + 2]) {
+					texture_has_nonzero_rgb[texture_id] = 1;
+					break;
+				}
+			}
+
 			// Create staging buffer
 			auto staging_buffer = myvk::Buffer::CreateStaging(device, data, data + width * height * 4);
 			// Free texture data
 			stbi_image_free(data);
-
-			// Assign TextureID
-			uint32_t texture_id = atomic_texture_id.fetch_add(1, std::memory_order_relaxed);
-			path_id_texture_ids[path_id] = texture_id;
 
 			// Create Image and ImageView
 			VkExtent2D extent = {(uint32_t)width, (uint32_t)height};
@@ -241,6 +249,23 @@ template <VkScene::TexLoad... Loads> void VkScene::load_textures(const Scene &sc
 			    dst_mat.*Loads.p_id = path_id_texture_ids[dst_mat.*Loads.p_id];
 		    }(),
 		    ...);
+
+	// Only materials assigned to scene triangles can disable the fallback light.
+	// Match GetSceneEmission: a loaded map_Ke replaces Ke, including an all-black
+	// map. If loading failed, the shader falls back to the constant emission.
+	m_has_emissive_surfaces = false;
+	for (uint32_t material_id : scene.GetMaterialIDs()) {
+		if (material_id >= scene.GetMaterials().size())
+			continue;
+		const Material &material = get_material(material_id);
+		const bool emissive = material.emission_texture_id == -1u
+		                          ? glm::any(glm::greaterThan(material.emission, glm::vec3(0.0f)))
+		                          : texture_has_nonzero_rgb[material.emission_texture_id] != 0;
+		if (emissive) {
+			m_has_emissive_surfaces = true;
+			break;
+		}
+	}
 
 	// If Textures are empty, insert an empty one
 	if (m_textures.empty()) {

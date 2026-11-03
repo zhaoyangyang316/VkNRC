@@ -1,0 +1,141 @@
+# Cornell Box measured geometry, adapted to Wavefront OBJ for VkNRC.
+# Source: Cornell University Program of Computer Graphics, public-use data:
+# https://bowers.cornell.edu/computer-graphics/data
+# Former URL: https://www.graphics.cornell.edu/online/box/data.html
+# Original measured millimeter coordinates transformed by (X,Y,Z)->(-X,Y,-Z).
+# Room dimensions: 556 x 548.8 x 559.2; rotated blocks: heights 165 and 330.
+# Measured quads are triangulated; the ceiling is split around its light hole.
+# No bottom faces are added beneath the blocks, as in the source geometry.
+# RGB materials approximate the source spectra; this is not a spectral reference.
+# After VkNRC normalization: camera (0,-0.005007153,3.861230329), yaw/pitch 0.
+# Reference vertical FOV: 39.3076481 degrees. Original camera image was square.
+# Camera-facing front is open; use a black environment for Cornell-box lighting.
+mtllib cornell-box.mtl
+
+v -552.8 0.0 0.0
+v 0.0 0.0 0.0
+v 0.0 0.0 -559.2
+v -549.6 0.0 -559.2
+v 0.0 548.8 -559.2
+v -556.0 548.8 -559.2
+v 0.0 548.8 0.0
+v -556.0 548.8 0.0
+v -343.0 548.8 -227.0
+v -343.0 548.8 -332.0
+v -213.0 548.8 -332.0
+v -213.0 548.8 -227.0
+v -213.0 548.8 0.0
+v -213.0 548.8 -559.2
+v -343.0 548.8 -559.2
+v -343.0 548.8 0.0
+v -130.0 165.0 -65.0
+v -82.0 165.0 -225.0
+v -240.0 165.0 -272.0
+v -290.0 165.0 -114.0
+v -290.0 0.0 -114.0
+v -240.0 0.0 -272.0
+v -130.0 0.0 -65.0
+v -82.0 0.0 -225.0
+v -423.0 330.0 -247.0
+v -265.0 330.0 -296.0
+v -314.0 330.0 -456.0
+v -472.0 330.0 -406.0
+v -423.0 0.0 -247.0
+v -472.0 0.0 -406.0
+v -314.0 0.0 -456.0
+v -265.0 0.0 -296.0
+
+o floor
+usemtl white
+f 1 2 3
+f 1 3 4
+
+o back_wall
+usemtl white
+f 4 3 5
+f 4 5 6
+
+o right_wall
+usemtl green
+f 3 2 7
+f 3 7 5
+
+o left_wall
+usemtl red
+f 1 4 6
+f 1 6 8
+
+o area_light
+usemtl light
+f 9 10 11
+f 9 11 12
+
+o ceiling_right
+usemtl white
+f 13 14 5
+f 13 5 7
+
+o ceiling_left
+usemtl white
+f 8 6 15
+f 8 15 16
+
+o ceiling_front
+usemtl white
+f 16 9 12
+f 16 12 13
+
+o ceiling_back
+usemtl white
+f 10 15 14
+f 10 14 11
+
+o short_block_top
+usemtl white
+f 17 18 19
+f 17 19 20
+
+o short_block_side_1
+usemtl white
+f 21 20 19
+f 21 19 22
+
+o short_block_side_2
+usemtl white
+f 23 17 20
+f 23 20 21
+
+o short_block_side_3
+usemtl white
+f 24 18 17
+f 24 17 23
+
+o short_block_side_4
+usemtl white
+f 22 19 18
+f 22 18 24
+
+o tall_block_top
+usemtl white
+f 25 26 27
+f 25 27 28
+
+o tall_block_side_1
+usemtl white
+f 29 25 28
+f 29 28 30
+
+o tall_block_side_2
+usemtl white
+f 30 28 27
+f 30 27 31
+
+o tall_block_side_3
+usemtl white
+f 31 27 26
+f 31 26 32
+
+o tall_block_side_4
+usemtl white
+f 32 26 25
+f 32 25 29

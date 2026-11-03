@@ -4,17 +4,70 @@
 
 #include <spdlog/spdlog.h>
 
+#include <charconv>
+#include <cmath>
+#include <string_view>
+#include "RenderCapture.hpp"
+
 #include "rg/NRCRenderGraph.hpp"
 
 constexpr uint32_t kFrameCount = 3, kWidth = 1280, kHeight = 720;
 
 int main(int argc, char **argv) {
+	const auto print_usage = [] {
+		spdlog::info("Usage: VkNRC <scene.obj> [--camera x y z] [--fov degrees] "
+		             "[--compare output-directory] [--warmup frames] [--samples frames] [--seed number]");
+	};
+	if (argc == 2 && std::string_view{argv[1]} == "--help") {
+		print_usage();
+		return EXIT_SUCCESS;
+	}
 	--argc, ++argv;
 	if (argc == 0) {
 		spdlog::error("No OBJ file");
+		print_usage();
 		return EXIT_FAILURE;
 	}
-	GLFWwindow *window = myvk::GLFWCreateWindow("VkNRC", kWidth, kHeight, true);
+	auto camera = myvk::MakePtr<Camera>();
+	std::filesystem::path comparison_directory;
+	uint32_t warmup_frames = 2048, sample_frames = 1024, comparison_seed = 1337;
+	const auto parse_uint = [](const char *text, uint32_t &value) {
+		std::string_view input{text};
+		auto [end, error] = std::from_chars(input.data(), input.data() + input.size(), value);
+		return error == std::errc{} && end == input.data() + input.size();
+	};
+	const auto parse_float = [](const char *text, float &value) {
+		std::string_view input{text};
+		auto [end, error] = std::from_chars(input.data(), input.data() + input.size(), value);
+		return error == std::errc{} && end == input.data() + input.size() && std::isfinite(value);
+	};
+	for (int i = 1; i < argc;) {
+		std::string_view option{argv[i++]};
+		if (option == "--camera" && i + 3 <= argc && parse_float(argv[i], camera->position.x) &&
+		    parse_float(argv[i + 1], camera->position.y) && parse_float(argv[i + 2], camera->position.z)) {
+			i += 3;
+		} else if (option == "--fov" && i < argc) {
+			float degrees;
+			if (!parse_float(argv[i++], degrees) || degrees <= 0.0f || degrees >= 179.0f) {
+				spdlog::error("Field of view must be a finite number between 0 and 179 degrees");
+				return EXIT_FAILURE;
+			}
+			camera->fov = glm::radians(degrees);
+		} else if (option == "--compare" && i < argc) {
+			comparison_directory = argv[i++];
+		} else if ((option == "--warmup" || option == "--samples" || option == "--seed") && i < argc) {
+			uint32_t &value = option == "--warmup" ? warmup_frames : option == "--samples" ? sample_frames : comparison_seed;
+			if (!parse_uint(argv[i++], value) || (option != "--seed" && value == 0)) {
+				spdlog::error("Invalid integer value for {}", option);
+				return EXIT_FAILURE;
+			}
+		} else {
+			spdlog::error("Invalid option or missing numeric arguments: {}", option);
+			print_usage();
+			return EXIT_FAILURE;
+		}
+	}
+	GLFWwindow *window = myvk::GLFWCreateWindow("VkNRC", kWidth, kHeight, comparison_directory.empty());
 
 	// Scene scene = Scene::LoadOBJShapeInstanceSAH(argv[0], 7); // at most 128 instances
 	Scene scene = Scene::LoadOBJSingleInstance(argv[0]);
@@ -73,13 +126,26 @@ int main(int argc, char **argv) {
 	     VK_NV_COOPERATIVE_MATRIX_EXTENSION_NAME, VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME});
 	myvk::ImGuiInit(window, myvk::CommandPool::Create(generic_queue));
 
-	auto camera = myvk::MakePtr<Camera>();
 	Camera::Control cam_control{.sensitivity = 0.005f, .speed = 0.5f, .prev_cursor_pos = {}};
 
 	auto vk_scene = myvk::MakePtr<VkScene>(generic_queue, scene);
+	spdlog::info("Environment intensity: {} ({})", vk_scene->GetEnvironmentIntensity(),
+	             vk_scene->HasEmissiveSurfaces() ? "emissive surface present" : "no emissive surfaces");
 	auto vk_scene_blas = myvk::MakePtr<VkSceneBLAS>(vk_scene);
 	auto vk_scene_tlas = myvk::MakePtr<VkSceneTLAS>(vk_scene_blas);
 	auto vk_nrc_state = myvk::MakePtr<VkNRCState>(generic_queue, VkExtent2D{kWidth, kHeight});
+	const bool compare = !comparison_directory.empty();
+	if (compare) {
+		vk_nrc_state->SetRandomSeed(comparison_seed);
+		vk_nrc_state->ResetMLPBuffers();
+		// Reproduce the interactive NRC/plain-PT split while training. Both
+		// measured captures then cover the entire image using frozen weights.
+		vk_nrc_state->SetRightMethod(VkNRCState::kNone);
+		spdlog::info("Comparison: split-view train {} frames, then capture {} SPP per method, seed {}",
+		             warmup_frames, sample_frames, comparison_seed);
+	}
+	uint32_t comparison_phase = 0, phase_frames = 0;
+	int exit_code = EXIT_SUCCESS;
 
 	auto frame_manager = myvk::FrameManager::Create(generic_queue, present_queue, false, kFrameCount);
 	frame_manager->SetResizeFunc([&](VkExtent2D extent) {
@@ -110,7 +176,11 @@ int main(int argc, char **argv) {
 		myvk::ImGuiNewFrame();
 		ImGui::Begin("Panel");
 		ImGui::Text("FPS %.1f", ImGui::GetIO().Framerate);
-		if (ImGui::CollapsingHeader("View")) {
+		if (compare) {
+			const char *phase = comparison_phase == 0 ? "Training" : comparison_phase == 1 ? "NRC capture" : "Path tracing capture";
+			ImGui::Text("%s: %u frames", phase, phase_frames);
+		}
+		if (!compare && ImGui::CollapsingHeader("View")) {
 			if (ImGui::Checkbox("Accumulate", &view_accumulate))
 				vk_nrc_state->SetAccumulate(view_accumulate);
 			if (vk_nrc_state->IsAccumulate()) {
@@ -127,7 +197,7 @@ int main(int argc, char **argv) {
 				vk_nrc_state->ResetAccumulateCount();
 			}
 		}
-		if (ImGui::CollapsingHeader("NRC")) {
+		if (!compare && ImGui::CollapsingHeader("NRC")) {
 			if (ImGui::Checkbox("Use EMA", &nrc_use_ema)) {
 				vk_nrc_state->SetUseEMAWeights(nrc_use_ema);
 				vk_nrc_state->ResetAccumulateCount();
@@ -149,10 +219,10 @@ int main(int argc, char **argv) {
 		ImGui::End();
 		ImGui::Render();
 
-		if (camera->DragControl(window, &cam_control, delta))
+		if (!compare && camera->DragControl(window, &cam_control, delta))
 			vk_nrc_state->ResetAccumulateCount();
 
-		if (nrc_lock && !nrc_train_one_frame)
+		if ((compare && comparison_phase != 0) || (nrc_lock && !nrc_train_one_frame))
 			vk_nrc_state->SetTrainProbability(0.0f);
 		else
 			vk_nrc_state->SetTrainProbability(VkNRCState::GetDefaultTrainProbability());
@@ -166,13 +236,35 @@ int main(int argc, char **argv) {
 			render_graph->CmdExecute(command_buffer);
 			command_buffer->End();
 
+			// Record this sample before presentation: Render may resize the
+			// accumulation image and reset its count, which must remain zero.
+			vk_nrc_state->NextFrame();
 			frame_manager->Render();
+			if (compare && ++phase_frames == (comparison_phase == 0 ? warmup_frames : sample_frames)) {
+				frame_manager->WaitIdle();
+				if (comparison_phase != 0) {
+					auto filename = comparison_directory / (comparison_phase == 1 ? "nrc.pfm" : "path-tracing.pfm");
+					if (!CaptureAccumulationPFM(generic_queue, vk_nrc_state->GetAccumulateImageView(), filename)) {
+						exit_code = EXIT_FAILURE;
+						break;
+					}
+				}
+				if (++comparison_phase == 3)
+					break;
+				phase_frames = 0;
+				vk_nrc_state->SetAccumulate(true);
+				vk_nrc_state->ResetAccumulateCount();
+				vk_nrc_state->SetRandomSeed(comparison_seed);
+				auto method = comparison_phase == 1 ? VkNRCState::kNRC : VkNRCState::kNone;
+				vk_nrc_state->SetLeftMethod(method);
+				vk_nrc_state->SetRightMethod(method);
+				view_left_method = view_right_method = static_cast<int>(method);
+				view_accumulate = true;
+			}
 		}
-
-		vk_nrc_state->NextFrame();
 	}
 
 	frame_manager->WaitIdle();
 	glfwTerminate();
-	return 0;
+	return exit_code;
 }

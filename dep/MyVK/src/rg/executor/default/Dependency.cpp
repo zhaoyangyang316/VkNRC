@@ -38,52 +38,55 @@ void Dependency::traverse_pass(const Args &args, const PassBase *p_pass) {
 		return;
 	m_pass_graph.AddVertex(p_pass);
 
-	const auto pass_visitor = [&](const PassWithInput auto *p_pass) {
-		for (const auto &it : p_pass->GetInputPoolData()) {
-			const InputBase *p_input = it.second.template Get<InputBase>();
-			get_dep_info(p_input).p_pass = p_pass;
-			get_dep_info(p_pass).inputs.push_back(p_input);
-
-			p_input->GetInputAlias().Visit(overloaded(
-			    [&](const OutputAlias auto *p_output_alias) {
-				    const InputBase *p_src_input = traverse_output_alias(args, *p_output_alias);
+	// Keep the visitors outside one another: MSVC 19.44 crashes when instantiating
+	// the equivalent triply nested generic lambdas.
+	const auto visit_resource = [&](const InputBase *p_input, const ResourceBase *p_resource) -> void {
+		p_resource->Visit(overloaded(
+		    [&](const CombinedResource auto *p_combined_resource) -> void {
+			    for (const OutputAlias auto &src_alias : p_combined_resource->GetSubAliases()) {
+				    const InputBase *p_src_input = traverse_output_alias(args, src_alias);
 				    const PassBase *p_src_pass = get_dep_info(p_src_input).p_pass;
-				    const ResourceBase *p_resource = get_dep_info(p_src_input).p_resource;
+				    const ResourceBase *p_sub_resource = get_dep_info(p_src_input).p_resource;
 
 				    // This means p_src_pass is present in the stack, so a cycle exists
-				    if (!p_resource)
+				    if (!p_sub_resource)
 					    Throw(error::PassNotDAG{});
 
-				    get_dep_info(p_input).p_resource = p_resource;
+				    m_pass_graph.AddEdge(p_src_pass, p_pass, PassEdge{p_src_input, p_input, p_sub_resource});
+				    m_resource_graph.AddEdge(p_resource, p_sub_resource, {});
+			    }
+		    },
+		    [&](auto &&) -> void {
+			    m_pass_graph.AddEdge(nullptr, p_pass, PassEdge{nullptr, p_input, p_resource});
+		    }));
+	};
+	const auto visit_input = [&](const InputBase *p_input) -> void {
+		get_dep_info(p_input).p_pass = p_pass;
+		get_dep_info(p_pass).inputs.push_back(p_input);
 
-				    m_pass_graph.AddEdge(p_src_pass, p_pass, PassEdge{p_src_input, p_input, p_resource});
-			    },
-			    [&](const RawAlias auto *p_raw_alias) {
-				    const ResourceBase *p_resource = args.collection.FindResource(p_raw_alias->GetSourceKey());
-				    m_resource_graph.AddVertex(p_resource);
-				    get_dep_info(p_input).p_resource = p_resource;
+		p_input->GetInputAlias().Visit(overloaded(
+		    [&](const OutputAlias auto *p_output_alias) -> void {
+			    const InputBase *p_src_input = traverse_output_alias(args, *p_output_alias);
+			    const PassBase *p_src_pass = get_dep_info(p_src_input).p_pass;
+			    const ResourceBase *p_resource = get_dep_info(p_src_input).p_resource;
 
-				    p_resource->Visit(overloaded(
-				        [&](const CombinedResource auto *p_combined_resource) {
-					        for (const OutputAlias auto &src_alias : p_combined_resource->GetSubAliases()) {
-						        const InputBase *p_src_input = traverse_output_alias(args, src_alias);
-						        const PassBase *p_src_pass = get_dep_info(p_src_input).p_pass;
-						        const ResourceBase *p_sub_resource = get_dep_info(p_src_input).p_resource;
+			    // This means p_src_pass is present in the stack, so a cycle exists
+			    if (!p_resource)
+				    Throw(error::PassNotDAG{});
 
-						        // This means p_src_pass is present in the stack, so a cycle exists
-						        if (!p_sub_resource)
-							        Throw(error::PassNotDAG{});
-
-						        m_pass_graph.AddEdge(p_src_pass, p_pass,
-						                             PassEdge{p_src_input, p_input, p_sub_resource});
-						        m_resource_graph.AddEdge(p_resource, p_sub_resource, {});
-					        }
-				        },
-				        [&](auto &&) {
-					        m_pass_graph.AddEdge(nullptr, p_pass, PassEdge{nullptr, p_input, p_resource});
-				        }));
-			    }));
-		}
+			    get_dep_info(p_input).p_resource = p_resource;
+			    m_pass_graph.AddEdge(p_src_pass, p_pass, PassEdge{p_src_input, p_input, p_resource});
+		    },
+		    [&](const RawAlias auto *p_raw_alias) -> void {
+			    const ResourceBase *p_resource = args.collection.FindResource(p_raw_alias->GetSourceKey());
+			    m_resource_graph.AddVertex(p_resource);
+			    get_dep_info(p_input).p_resource = p_resource;
+			    visit_resource(p_input, p_resource);
+		    }));
+	};
+	const auto pass_visitor = [&](const PassWithInput auto *p_input_pass) -> void {
+		for (const auto &it : p_input_pass->GetInputPoolData())
+			visit_input(it.second.template Get<InputBase>());
 	};
 
 	p_pass->Visit(overloaded(pass_visitor, [](auto &&) {}));

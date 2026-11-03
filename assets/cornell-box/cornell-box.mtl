@@ -1,0 +1,37 @@
+# RGB approximations for the measured diffuse Cornell Box.
+# Geometry and spectral reference: Cornell University Program of Computer Graphics
+# https://bowers.cornell.edu/computer-graphics/data
+# These RGB coefficients are illustrative, not a calibrated spectral conversion.
+# Ks=0 gives diffuse materials; Pr is tinyobjloader's roughness extension.
+
+newmtl white
+Kd 0.725 0.710 0.680
+Ks 0 0 0
+Ke 0 0 0
+Pr 1
+Ni 1.5
+illum 1
+
+newmtl red
+Kd 0.630 0.065 0.050
+Ks 0 0 0
+Ke 0 0 0
+Pr 1
+Ni 1.5
+illum 1
+
+newmtl green
+Kd 0.140 0.450 0.091
+Ks 0 0 0
+Ke 0 0 0
+Pr 1
+Ni 1.5
+illum 1
+
+newmtl light
+Kd 0.78 0.78 0.78
+Ks 0 0 0
+Ke 15 12 8
+Pr 1
+Ni 1.5
+illum 1

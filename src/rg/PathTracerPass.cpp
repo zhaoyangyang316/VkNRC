@@ -79,6 +79,7 @@ myvk::Ptr<myvk::ComputePipeline> PathTracerPass::CreatePipeline() const {
 	};
 	auto shader_module = myvk::ShaderModule::Create(device, kCompSpv, sizeof(kCompSpv));
 	shader_module->AddSpecialization(0, (uint32_t)m_scene_ptr->GetTextures().size());
+	shader_module->AddSpecialization(1, m_scene_ptr->GetEnvironmentIntensity());
 	return myvk::ComputePipeline::Create(pipeline_layout, shader_module);
 }
 

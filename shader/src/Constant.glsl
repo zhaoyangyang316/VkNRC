@@ -5,7 +5,9 @@
 #define NRC_HIDDEN_LAYERS 5
 #define NRC_TRAIN_BATCH_COUNT 4
 #define NRC_TRAIN_BATCH_SIZE 16384
-#define LOSS_SCALE 1.0
+// Backpropagation and per-subgroup gradient sums use FP16. Reduce their range
+// before accumulation; the optimizer divides by this scale again in FP32.
+#define LOSS_SCALE (1.0 / 128.0)
 
 // Optimizer Options
 #define ADAM_BETA1 0.9

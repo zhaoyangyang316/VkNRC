@@ -152,6 +152,9 @@ vec3 NNOutput3(in const fcoopmatNV<16, gl_ScopeSubgroup, 16, 16> act_coopmats[SU
 		coopMatStoreNV(act_coopmats[y], SHARED_BUFFER, MAT64_COOPMAT_ELEMENT(0, workgroup_y), MAT64_COOPMAT_STRIDE,
 		               ACT_COOPMAT_MAJOR);
 	}
+	// Cooperative stores are distributed over the subgroup's invocations. Make
+	// every store visible before each invocation reads its own output sample.
+	barrier();
 	uvec2 uv2 = SHARED_BUFFER[gl_LocalInvocationID.x * UV4_X].rg;
 	barrier();
 	return vec3(unpackHalf2x16(uv2.x), unpackHalf2x16(uv2.y).x);

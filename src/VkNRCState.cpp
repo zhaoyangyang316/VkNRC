@@ -89,7 +89,7 @@ void VkNRCState::ResetMLPBuffers() {
 
 void VkNRCState::ResetAccumulateImage(VkExtent2D extent) {
 	auto image = myvk::Image::CreateTexture2D(GetDevicePtr(), extent, 1, VK_FORMAT_R32G32B32A32_SFLOAT,
-	                                          VK_IMAGE_USAGE_STORAGE_BIT);
+	                                          VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
 	m_accumulate_view = myvk::ImageView::Create(image, VK_IMAGE_VIEW_TYPE_2D);
 
 	auto command_buffer = myvk::CommandBuffer::Create(myvk::CommandPool::Create(m_queue_ptr));

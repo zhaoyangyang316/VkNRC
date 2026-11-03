@@ -8,7 +8,8 @@
 #extension GL_KHR_memory_scope_semantics : enable
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-#define MAX_BOUNCE 8
+#define MAX_BOUNCE 64
+#define MAX_TRAIN_RECORDS 8
 #define T_MIN 1e-6
 #define T_MAX 4.0
 #define C 0.01
@@ -139,7 +140,9 @@ CookTorranceBRDFArgs GetHitBRDFArgs(in const Hit hit) {
 	return args;
 }
 
-const vec3 kConstLight = vec3(10, 10, 10);
+// Use a constant environment only when the scene has no emissive surfaces.
+layout(constant_id = 1) const float kEnvironmentIntensity = 10.0;
+const vec3 kConstLight = vec3(kEnvironmentIntensity);
 
 vec3 NormalizeRGB(in const vec3 rgb) { return !any(isnan(rgb)) && !any(isinf(rgb)) ? max(rgb, vec3(0)) : vec3(0); }
 
@@ -205,214 +208,179 @@ struct PathTraceResult {
 	vec3 bias, factor;
 };
 
-PathTraceResult PathTrace(Hit hit, Ray ray, in const uint method) {
-	vec3 radiance = vec3(0), accumulate = vec3(1);
+void PushScreenQuery(in const Hit hit, in const Ray incoming_ray) {
+	uint eval_id = atomicAdd(uEvalCount, 1u, gl_ScopeQueueFamily, gl_StorageSemanticsBuffer, gl_SemanticsRelaxed);
+	NRCEvalRecord record;
+	record.dst = EncodeNRCEvalDstScreen(gl_GlobalInvocationID.xy);
+	record.packed_input = MakeNRCInput(hit, -incoming_ray.d);
+	uEvalRecords[eval_id] = record;
+}
 
-	BRDFStepInfo info = BRDFStep(hit, ray);
-	radiance += accumulate * hit.emission;
-	accumulate *= info.color;
-	ray = info.ray;
+// Cache scattered radiance S_i toward the previous path vertex, excluding E_i.
+// A training target obeys S_i = w_i * (E_(i+1) + S_(i+1)). At a cache endpoint k,
+// every earlier record is bias_i + factor_i * S_k; endpoint k is not self-labelled.
+PathTraceResult TracePath(Hit hit, Ray ray, in const uint method, in const bool train) {
+	vec3 train_bias[MAX_TRAIN_RECORDS], train_factor[MAX_TRAIN_RECORDS];
+	PackedNRCInput train_input[MAX_TRAIN_RECORDS];
+	uint train_count = 0;
+	bool train_active = train, render_active = true, bootstrap = false;
+	PackedNRCInput bootstrap_input;
+	// Anchor 1/16 of training paths with actual traced transport instead of a
+	// learned terminal value. Roulette ends these paths; the common 64-vertex
+	// safety cap also applies to the plain path tracer (a small residual bias).
+	bool unbiased_training = train && RNGNext() < (1.0 / 16.0);
 
-	float inf32 = uintBitsToFloat(0x7F800000u);
+	vec3 radiance = vec3(0), render_weight = vec3(1), path_weight = vec3(1);
+	PathTraceResult result = PathTraceResult(vec3(0), vec3(0));
+	float primary_cosine = abs(dot(hit.normal, -ray.d));
+	float primary_spread = _distance_2(ray.o, hit.position) / (4.0 * M_PI * max(primary_cosine, 1e-12));
+	float threshold = C * primary_spread;
+	float spread_sum = 0.0, suffix_spread_sum = 0.0;
+	bool suffix_started = false;
 
-	float c_a0 = subgroupAll(method == METHOD_NONE) ? inf32 : C * info.dist2 / (4 * M_PI * info.cosine);
+	for (uint vertex = 0; vertex < MAX_BOUNCE; ++vertex) {
+		// Emission at this vertex contributes to preceding vertices, but not to
+		// the scattered-radiance target stored at this vertex itself.
+		if (render_active)
+			radiance += render_weight * hit.emission;
+		if (train_active) {
+			for (uint i = 0; i < train_count; ++i)
+				train_bias[i] += train_factor[i] * hit.emission;
+		}
 
-	float sqrt_a_sum = 0.0;
-	if (subgroupAll(method != METHOD_CACHE)) {
-		for (uint bounce = 1; bounce < MAX_BOUNCE && sqrt_a_sum * sqrt_a_sum <= c_a0; ++bounce) {
-			rayQueryEXT ray_query;
-			rayQueryInitializeEXT(ray_query, uTLAS, gl_RayFlagsOpaqueEXT, 0xFF, ray.o, T_MIN, ray.d, T_MAX);
-			while (rayQueryProceedEXT(ray_query))
-				;
+		bool nrc_endpoint = spread_sum * spread_sum > threshold;
+		if (render_active && (method == METHOD_CACHE || (method == METHOD_NRC && nrc_endpoint))) {
+			PushScreenQuery(hit, ray);
+			result = PathTraceResult(radiance, render_weight);
+			render_active = false;
+		}
 
-			if (rayQueryGetIntersectionTypeEXT(ray_query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
-				hit = GetRayQueryHit(ray_query, ray);
-				info = BRDFStep(hit, ray);
-				radiance += accumulate * hit.emission;
-				accumulate *= info.color;
-				ray = info.ray;
-				sqrt_a_sum += sqrt(info.dist2 / (info.pdf * info.cosine));
-			} else {
-				radiance += accumulate * kConstLight;
-				return PathTraceResult(radiance, accumulate);
+		if (train_active && !unbiased_training &&
+		    ((suffix_started && suffix_spread_sum * suffix_spread_sum > threshold) ||
+		     train_count == MAX_TRAIN_RECORDS)) {
+			bootstrap_input = MakeNRCInput(hit, -ray.d);
+			bootstrap = true;
+			train_active = false;
+		}
+		// Training coverage and suffix length do not depend on the displayed
+		// method; even pixels in the plain-PT half supply training records.
+		if (!suffix_started && nrc_endpoint) {
+			suffix_started = true;
+			suffix_spread_sum = 0.0;
+		}
+		if (!render_active && !train_active)
+			break;
+		if (vertex + 1 == MAX_BOUNCE)
+			break;
+
+		if (train_active && train_count < MAX_TRAIN_RECORDS) {
+			train_input[train_count] = MakeNRCInput(hit, -ray.d);
+			train_bias[train_count] = vec3(0);
+			train_factor[train_count] = vec3(1);
+			++train_count;
+		}
+
+		BRDFStepInfo step = BRDFStep(hit, ray);
+		if (!any(greaterThan(step.color, vec3(0))))
+			break;
+		path_weight *= step.color;
+		// The survival correction is included in every active estimator, both
+		// screen throughput and all training suffixes, so roulette loses no energy.
+		if (vertex >= 3) {
+			float survival = clamp(max(path_weight.r, max(path_weight.g, path_weight.b)), 0.05, 0.95);
+			if (RNGNext() >= survival)
+				break;
+			step.color /= survival;
+			path_weight /= survival;
+		}
+		if (render_active)
+			render_weight *= step.color;
+		if (train_active) {
+			for (uint i = 0; i < train_count; ++i)
+				train_factor[i] *= step.color;
+		}
+
+		ray = step.ray;
+		rayQueryEXT ray_query;
+		rayQueryInitializeEXT(ray_query, uTLAS, gl_RayFlagsOpaqueEXT, 0xFF, ray.o, T_MIN, ray.d, T_MAX);
+		while (rayQueryProceedEXT(ray_query))
+			;
+		if (rayQueryGetIntersectionTypeEXT(ray_query, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
+			if (render_active)
+				radiance += render_weight * kConstLight;
+			if (train_active) {
+				for (uint i = 0; i < train_count; ++i)
+					train_bias[i] += train_factor[i] * kConstLight;
+			}
+			break;
+		}
+		hit = GetRayQueryHit(ray_query, ray);
+		// Eq. 3 uses the predecessor's sampled-direction PDF and the arriving
+		// ray's cosine at this vertex, not a new sample at the current vertex.
+		float arrival_cosine = abs(dot(hit.normal, -ray.d));
+		float spread_step = sqrt(_distance_2(ray.o, hit.position) / max(step.pdf * arrival_cosine, 1e-12));
+		spread_sum += spread_step;
+		if (suffix_started)
+			suffix_spread_sum += spread_step;
+	}
+
+	if (render_active)
+		result = PathTraceResult(radiance, vec3(0));
+
+	if (train_count > 0) {
+		uint batch = min(uint(RNGNext() * NRC_TRAIN_BATCH_COUNT), NRC_TRAIN_BATCH_COUNT - 1u);
+		uint first = atomicAdd(uBatchTrainCounts[batch].count, train_count, gl_ScopeQueueFamily,
+		                       gl_StorageSemanticsBuffer, gl_SemanticsRelaxed);
+		if (first < NRC_TRAIN_BATCH_SIZE) {
+			uint count = min(train_count, NRC_TRAIN_BATCH_SIZE - first);
+			for (uint i = 0; i < count; ++i) {
+				NRCTrainRecord record;
+				record.bias_r = train_bias[i].r;
+				record.bias_g = train_bias[i].g;
+				record.bias_b = train_bias[i].b;
+				vec3 factor = bootstrap ? train_factor[i] : vec3(0);
+				record.factor_r = factor.r;
+				record.factor_g = factor.g;
+				record.factor_b = factor.b;
+				record.packed_input = train_input[i];
+				uBatchTrainRecords[batch].records[first + i] = record;
+			}
+			if (bootstrap) {
+				uint eval_id = atomicAdd(uEvalCount, 1u, gl_ScopeQueueFamily, gl_StorageSemanticsBuffer,
+				                         gl_SemanticsRelaxed);
+				NRCEvalRecord record;
+				record.dst = EncodeNRCEvalDstTrain(batch, first, first + count - 1u);
+				record.packed_input = bootstrap_input;
+				uEvalRecords[eval_id] = record;
 			}
 		}
 	}
-
-	if (subgroupAll(method != METHOD_NONE)) {
-		// Push a EvalRecord
-		uint eval_id = atomicAdd(uEvalCount, 1u, gl_ScopeQueueFamily, gl_StorageSemanticsBuffer, gl_SemanticsRelaxed);
-		NRCEvalRecord eval_record;
-		eval_record.dst = EncodeNRCEvalDstScreen(gl_GlobalInvocationID.xy);
-		eval_record.packed_input = MakeNRCInput(hit, ray.d);
-		uEvalRecords[eval_id] = eval_record;
-	}
-
-	return PathTraceResult(radiance, accumulate);
-}
-
-PathTraceResult ExtendedPathTrace(Hit hit, Ray ray, in const uint method) {
-	// assert(method != METHOD_NONE)
-	vec3 lights[MAX_BOUNCE], colors[MAX_BOUNCE];
-	PackedNRCInput inputs[MAX_BOUNCE];
-
-	[[unroll]] for (uint i = 0; i < MAX_BOUNCE; ++i) {
-		colors[i] = vec3(1);
-		lights[i] = vec3(0);
-	}
-
-	vec3 accumulate = vec3(1), radiance = vec3(0);
-	bool light_terminate = false;
-
-	BRDFStepInfo info = BRDFStep(hit, ray);
-	radiance += accumulate * hit.emission;
-	accumulate *= info.color;
-	ray = info.ray;
-
-	PathTraceResult result = PathTraceResult(radiance, accumulate);
-
-	inputs[0] = MakeNRCInput(hit, ray.d);
-
-	float c_a0 = C * info.dist2 / (4 * M_PI * info.cosine);
-	float sqrt_a_sum = 0.0;
-	uint bounce = 1;
-	for (; bounce < MAX_BOUNCE && sqrt_a_sum * sqrt_a_sum <= c_a0; ++bounce) {
-		rayQueryEXT ray_query;
-		rayQueryInitializeEXT(ray_query, uTLAS, gl_RayFlagsOpaqueEXT, 0xFF, ray.o, T_MIN, ray.d, T_MAX);
-		while (rayQueryProceedEXT(ray_query))
-			;
-
-		if (rayQueryGetIntersectionTypeEXT(ray_query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
-			hit = GetRayQueryHit(ray_query, ray);
-			info = BRDFStep(hit, ray);
-			radiance += accumulate * hit.emission;
-			accumulate *= info.color;
-			ray = info.ray;
-			sqrt_a_sum += sqrt(info.dist2 / (info.pdf * info.cosine));
-			lights[bounce - 1] = hit.emission;
-			colors[bounce - 1] = info.color;
-			inputs[bounce] = MakeNRCInput(hit, ray.d);
-		} else {
-			radiance += accumulate * kConstLight;
-			lights[bounce - 1] = kConstLight;
-			light_terminate = true;
-			break;
-		}
-	}
-	if (subgroupAll(method == METHOD_CACHE)) {
-		uint eval_id = atomicAdd(uEvalCount, 1u, gl_ScopeQueueFamily, gl_StorageSemanticsBuffer, gl_SemanticsRelaxed);
-		NRCEvalRecord eval_record;
-		eval_record.dst = EncodeNRCEvalDstScreen(gl_GlobalInvocationID.xy);
-		eval_record.packed_input = inputs[0];
-		uEvalRecords[eval_id] = eval_record;
-	} else {
-		result = PathTraceResult(radiance, accumulate);
-		if (!light_terminate) {
-			uint eval_id =
-			    atomicAdd(uEvalCount, 1u, gl_ScopeQueueFamily, gl_StorageSemanticsBuffer, gl_SemanticsRelaxed);
-			NRCEvalRecord eval_record;
-			eval_record.dst = EncodeNRCEvalDstScreen(gl_GlobalInvocationID.xy);
-			eval_record.packed_input = inputs[bounce - 1];
-			uEvalRecords[eval_id] = eval_record;
-		}
-	}
-
-	sqrt_a_sum = 0;
-	light_terminate = false;
-	for (; bounce < MAX_BOUNCE && sqrt_a_sum * sqrt_a_sum <= c_a0; ++bounce) {
-		rayQueryEXT ray_query;
-		rayQueryInitializeEXT(ray_query, uTLAS, gl_RayFlagsOpaqueEXT, 0xFF, ray.o, T_MIN, ray.d, T_MAX);
-		while (rayQueryProceedEXT(ray_query))
-			;
-
-		if (rayQueryGetIntersectionTypeEXT(ray_query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
-			hit = GetRayQueryHit(ray_query, ray);
-			info = BRDFStep(hit, ray);
-			ray = info.ray;
-			sqrt_a_sum += sqrt(info.dist2 / (info.pdf * info.cosine));
-			lights[bounce - 1] = hit.emission;
-			colors[bounce - 1] = info.color;
-			inputs[bounce] = MakeNRCInput(hit, ray.d);
-		} else {
-			lights[bounce - 1] = kConstLight;
-			light_terminate = true;
-			break;
-		}
-	}
-
-	uint batch = clamp(uint(RNGNext() * NRC_TRAIN_BATCH_COUNT), 0u, NRC_TRAIN_BATCH_COUNT - 1);
-	uint train_id = atomicAdd(uBatchTrainCounts[batch].count, bounce, gl_ScopeQueueFamily, gl_StorageSemanticsBuffer,
-	                          gl_SemanticsRelaxed);
-	if (train_id < NRC_TRAIN_BATCH_SIZE) {
-		for (uint i = bounce - 2u; i != -1u; --i) {
-			lights[i] += colors[i] * lights[i + 1];
-			colors[i] *= colors[i + 1];
-		}
-		uint train_count = min(bounce, NRC_TRAIN_BATCH_SIZE - train_id);
-		for (uint i = 0; i < train_count; ++i) {
-			NRCTrainRecord train_record;
-			train_record.bias_r = lights[i].r;
-			train_record.bias_g = lights[i].g;
-			train_record.bias_b = lights[i].b;
-			train_record.factor_r = colors[i].r;
-			train_record.factor_g = colors[i].g;
-			train_record.factor_b = colors[i].b;
-			train_record.packed_input = inputs[i];
-			uBatchTrainRecords[batch].records[train_id + i] = train_record;
-		}
-
-		if (!light_terminate) {
-			uint eval_id =
-			    atomicAdd(uEvalCount, 1u, gl_ScopeQueueFamily, gl_StorageSemanticsBuffer, gl_SemanticsRelaxed);
-			NRCEvalRecord eval_record;
-			eval_record.dst = EncodeNRCEvalDstTrain(batch, train_id, train_id + train_count - 1);
-			eval_record.packed_input = inputs[bounce - 1];
-			uEvalRecords[eval_id] = eval_record;
-		}
-	}
-
 	return result;
 }
 
 void main() {
 	uvec2 coord = gl_GlobalInvocationID.xy;
-
-	// Seed on 256 x 256 Tile
 	uint seed = (((coord.y & 0xFF) << 8) | (coord.x & 0xFF)) + uSeed;
 	RNGSetState(seed);
-
 	if (any(greaterThanEqual(coord, uExtent)))
 		return;
 
-	uint method = subgroupAll(coord.x <= uExtent.x / 2) ? uLeftMethod : uRightMethod;
-
+	uint method = coord.x < uExtent.x / 2 ? uLeftMethod : uRightMethod;
 	bool train = false;
-	if (subgroupAll(method != METHOD_NONE)) {
-		if (subgroupElect())
-			train = RNGNext() < uTrainProbability;
-		train = subgroupBroadcastFirst(train);
-	}
+	if (subgroupElect())
+		train = RNGNext() < uTrainProbability;
+	train = subgroupBroadcastFirst(train);
 
-	uvec2 primitive_id_instance_id = texelFetch(uPrimitiveID_InstanceID, ivec2(coord), 0).rg;
-	uint primitive_id = primitive_id_instance_id.x, instance_id = primitive_id_instance_id.y;
-
+	uvec2 primitive_instance = texelFetch(uPrimitiveID_InstanceID, ivec2(coord), 0).rg;
 	PathTraceResult result;
-	if (primitive_id == -1u)
+	if (primitive_instance.x == -1u)
 		result = PathTraceResult(kConstLight, vec3(0));
 	else {
-		Ray ray;
-		{
-			vec2 clip = (vec2(coord) + 0.5) / vec2(uExtent);
-			clip = clip * 2.0 - 1.0;
-			ray = Ray(uOrigin, normalize(uLook + clip.x * uSide + clip.y * uUp));
-		}
-		Hit hit = GetVBufferHit(primitive_id, instance_id, ray);
-		if (subgroupAll(train))
-			result = ExtendedPathTrace(hit, ray, method);
-		else if (subgroupAll(!train))
-			result = PathTrace(hit, ray, method);
+		vec2 clip = (vec2(coord) + 0.5) / vec2(uExtent) * 2.0 - 1.0;
+		Ray ray = Ray(uOrigin, normalize(uLook + clip.x * uSide + clip.y * uUp));
+		Hit hit = GetVBufferHit(primitive_instance.x, primitive_instance.y, ray);
+		result = TracePath(hit, ray, method, train);
 	}
-
 	result.bias = NormalizeRGB(result.bias);
 	result.factor = NormalizeRGB(result.factor);
 	imageStore(uBias_FactorR, ivec2(coord), vec4(result.bias, result.factor.r));
