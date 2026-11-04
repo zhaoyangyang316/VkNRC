@@ -65,6 +65,8 @@ public:
 	inline Method GetRightMethod() const { return m_right_method; }
 	inline bool IsAccumulate() const { return m_accumulate; }
 	inline uint32_t GetAccumulateCount() const { return m_accumulate_count; }
+	// Sample count represented by the image after NextFrame().
+	inline uint32_t GetRenderedSPP() const { return m_accumulate ? m_accumulate_count : 1u; }
 	inline uint32_t GetAccumulationWindow() const { return m_accumulation_window; }
 	inline uint32_t GetHistoryWriteIndex() const { return m_history_write_index; }
 	inline uint32_t GetMaxAccumulationWindow() const { return max_accumulation_window(m_accumulate_extent); }

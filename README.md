@@ -150,6 +150,19 @@ from accumulation or the cache.
 
 Controls:
 
+- **Capture frame (EXR)** saves the latest rendered image, including the current
+  split view and accumulation, as a linear 32-bit RGB OpenEXR. It works while
+  rendering or paused and preserves the rendered resolution. Captures are taken
+  before tone mapping and the UI overlay. The panel shows the full file path
+  under `captures` in the working directory. **Include render metadata** is on
+  by default. The header records the resolution, NEE, max bounces, SPP, left
+  and right methods (**NRC**, **PT**, or **Cache**), and scene name. Labels
+  are filled automatically. SPP counts the samples in the captured image:
+  one with accumulation off, the number collected so far during warm-up, and
+  at most the selected window size for rolling accumulation.
+  Enable **Print metadata in lower right** to draw those same fields
+  on a dark panel in the bottom-right corner of the saved image. This option
+  is off by default and can be used independently of the EXR header metadata.
 - **Indirect illumination only:** show illumination that has scattered at least
   twice before reaching the camera. This removes visible emitter emission and
   background, direct-light samples at the primary surface, and emitter/environment

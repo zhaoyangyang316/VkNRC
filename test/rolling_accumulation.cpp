@@ -201,6 +201,73 @@ public:
 		++m_asserted_frames;
 	}
 	uint32_t AssertedFrames() const { return m_asserted_frames; }
+	void CaptureSPP(const char *filename) {
+		const uint32_t spp = state->GetRenderedSPP();
+		Require(spp == m_reference.size(), "Capture SPP differs from the number of contributing frames");
+		const CaptureMetadata metadata{.settings = {.nee = false, .left_method = VkNRCState::kNRC,
+		                                            .right_method = VkNRCState::kCache, .max_bounces = 11,
+		                                            .spp = spp, .scene_name = "SPP fixture"}};
+		Require(CaptureAccumulationEXR(m_queue, state->GetAccumulateImageView(), m_capture.parent_path() / filename,
+		                               &metadata), "SPP metadata capture failed");
+	}
+	// Capture one row- and column-dependent frame in both formats. The red channel
+	// marks x, green marks y, and blue exceeds the range of half-precision EXR.
+	void CapturePatternPair() {
+		Require(m_input_initialized && state->GetAccumulationWindow() == 1,
+		        "Pattern capture requires the initialized one-sample window");
+		std::vector<std::array<float, 4>> pixels;
+		for (uint32_t y = 0; y < m_extent.height; ++y)
+			for (uint32_t x = 0; x < m_extent.width; ++x)
+				pixels.push_back({0.125f + x / 32.0f, 2.25f + y / 2.0f, 70000.25f + x / 8.0f + y * 8.0f, 1.0f});
+		auto staging = myvk::Buffer::CreateStaging(m_queue->GetDevicePtr(), pixels.begin(), pixels.end());
+		auto command = myvk::CommandBuffer::Create(myvk::CommandPool::Create(m_queue));
+		Check(command->Begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT), "pattern command begin");
+		const auto &image = m_input->GetImagePtr();
+		command->CmdPipelineBarrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, {}, {},
+		                            {image->GetMemoryBarrier(m_input->GetSubresourceRange(), VK_ACCESS_MEMORY_READ_BIT,
+		                                                     VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL,
+		                                                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)});
+		VkBufferImageCopy copy{.imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1},
+		                       .imageExtent = {m_extent.width, m_extent.height, 1}};
+		command->CmdCopy(staging, image, {copy});
+		command->CmdPipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, {}, {},
+		                            {image->GetMemoryBarrier(m_input->GetSubresourceRange(), VK_ACCESS_TRANSFER_WRITE_BIT,
+		                                                     VK_ACCESS_INPUT_ATTACHMENT_READ_BIT,
+		                                                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL)});
+		m_graph->CmdExecute(command);
+		Check(command->End(), "pattern command end");
+		auto fence = myvk::Fence::Create(m_queue->GetDevicePtr());
+		Check(command->Submit(fence), "pattern submit");
+		Check(fence->Wait(), "pattern render wait");
+		const auto &accumulated = state->GetAccumulateImageView();
+		Require(CaptureAccumulationPFM(m_queue, accumulated, m_capture.parent_path() / "capture.pfm"), "Pattern PFM failed");
+		Require(CaptureAccumulationEXR(m_queue, accumulated, m_capture.parent_path() / "capture.exr"), "Pattern EXR failed");
+		const CaptureMetadata nee_on{
+		    .settings = {.nee = true, .left_method = VkNRCState::kNone, .right_method = VkNRCState::kNRC,
+		                 .max_bounces = 64, .spp = 1, .scene_name = "Ajar \xE7\x81\xAF"}}; // UTF-8 U+706F
+		const CaptureMetadata nee_off{
+		    .settings = {.nee = false, .left_method = VkNRCState::kCache, .right_method = VkNRCState::kNone,
+		                 .max_bounces = 3, .spp = 1, .scene_name = "HDR pattern"}};
+		Require(CaptureAccumulationEXR(m_queue, accumulated, m_capture.parent_path() / "capture-nee-on.exr", &nee_on),
+		        "Pattern EXR with NEE-on metadata failed");
+		Require(CaptureAccumulationEXR(m_queue, accumulated, m_capture.parent_path() / "capture-nee-off.exr", &nee_off),
+		        "Pattern EXR with NEE-off metadata failed");
+	}
+	void CaptureCaptionVariants() {
+		Resize({640, 320});
+		Render({4.0f, 0.5f, 0.125f}, "flat HDR caption reference");
+		const auto &image = state->GetAccumulateImageView();
+		const auto dir = m_capture.parent_path();
+		CaptureMetadata caption{
+		    .settings = {.nee = true, .left_method = VkNRCState::kNone, .right_method = VkNRCState::kNRC,
+		                 .max_bounces = 32, .spp = state->GetRenderedSPP(), .scene_name = "Flat HDR fixture"},
+		    .write_header = true, .print_caption = true};
+		Require(CaptureAccumulationEXR(m_queue, image, dir / "caption-with-header.exr", &caption), "Caption and header failed");
+		caption.write_header = false;
+		Require(CaptureAccumulationEXR(m_queue, image, dir / "caption-only.exr", &caption), "Caption only failed");
+		// Capturing the original last also checks that the caption did not modify the GPU image.
+		Require(CaptureAccumulationEXR(m_queue, image, dir / "caption-plain.exr"), "Plain frame after caption failed");
+	}
 };
 } // namespace
 
@@ -245,13 +312,18 @@ int main(int argc, char **argv) {
 		test.CheckCapture("pause leaves image unchanged");
 		pass("pause freezes count, ring index, RNG and image");
 		test.Resize({13, 5});
-		for (unsigned i = 0; i < 11; ++i)
+		for (unsigned i = 0; i < 11; ++i) {
 			test.Render({float(i), 0.25f, float(i % 3)}, "resize resets history");
+			if (i == 1)
+				test.CaptureSPP("spp-partial.exr");
+		}
+		test.CaptureSPP("spp-full.exr");
 		pass("resize rebuilds and resets history");
 		test.state->SetAccumulate(false);
 		test.ResetReference();
 		for (unsigned i = 0; i < 6; ++i)
 			test.Render({float(i), float(i + 2), 0.0f}, "accumulation off");
+		test.CaptureSPP("spp-single.exr");
 		pass("accumulation off displays current frame only");
 		test.state->SetAccumulate(true);
 		test.ResetReference();
@@ -261,10 +333,15 @@ int main(int argc, char **argv) {
 		test.SetWindow(0);
 		for (unsigned i = 0; i < 20; ++i)
 			test.Render({float(i % 4), 0.5f, 1.0f}, "unlimited cumulative mean");
+		test.CaptureSPP("spp-cumulative.exr");
 		pass("window zero retains cumulative averaging");
 		test.SetWindow(1);
 		test.Render({0.25f, 1.0f, 2.0f}, "unlimited to window one");
 		pass("unlimited to finite window resets history");
+		test.CapturePatternPair();
+		pass("export asymmetric 13x5 linear HDR frame to PFM and EXR with and without metadata");
+		test.CaptureCaptionVariants();
+		pass("export caption and header, caption only, and untouched HDR reference");
 		Check(device->WaitIdle(), "final wait");
 		Require(g_validation_errors.load() == 0, "Vulkan reported validation errors");
 		std::cout << "PASS all " << test.AssertedFrames() << " GPU frames (every RGB channel of every pixel)\n";

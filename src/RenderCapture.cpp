@@ -1,6 +1,9 @@
 #include "RenderCapture.hpp"
+#include "CaptureCaption.hpp"
 
+#include <array>
 #include <bit>
+#include <cstdint>
 #include <fstream>
 #include <limits>
 #include <vector>
@@ -27,13 +30,141 @@ bool CheckResult(VkResult result, const char *operation) {
 	spdlog::error("Capture: {} failed (VkResult {})", operation, static_cast<int>(result));
 	return false;
 }
-} // namespace
+enum class Format { PFM, EXR };
 
-bool CaptureAccumulationPFM(const myvk::Ptr<myvk::Queue> &queue,
-                            const myvk::Ptr<myvk::ImageView> &image_view,
-                            const std::filesystem::path &filename) {
-	static_assert(sizeof(float) == 4 && std::numeric_limits<float>::is_iec559);
-	static_assert(std::endian::native == std::endian::little, "PFM writer requires a little-endian host");
+// Both formats below store IEEE binary32 in little-endian byte order.
+static_assert(sizeof(float) == 4 && std::numeric_limits<float>::is_iec559);
+static_assert(std::endian::native == std::endian::little);
+
+template <typename T> void WriteValue(std::ostream &output, const T &value) {
+	output.write(reinterpret_cast<const char *>(&value), sizeof(value));
+}
+
+void WriteAttributeHeader(std::ostream &output, std::string_view name, const char *type, int32_t bytes) {
+	output << name << '\0' << type << '\0';
+	WriteValue(output, bytes);
+}
+
+void WriteStringAttribute(std::ostream &output, std::string_view name, std::string_view value) {
+	if (value.size() > std::numeric_limits<int32_t>::max()) {
+		output.setstate(std::ios::failbit);
+		return;
+	}
+	const auto bytes = static_cast<int32_t>(value.size());
+	WriteAttributeHeader(output, name, "string", bytes);
+	if (bytes != 0)
+		output.write(value.data(), bytes);
+}
+
+void WriteCaptureMetadata(std::ostream &output, const CaptureRenderSettings &settings, VkExtent3D extent) {
+	const auto left = capture_detail::MethodName(settings.left_method), right = capture_detail::MethodName(settings.right_method);
+	constexpr auto int_max = std::numeric_limits<int32_t>::max();
+	if (left.empty() || right.empty() || settings.max_bounces > int_max) {
+		output.setstate(std::ios::failbit);
+		return;
+	}
+	WriteStringAttribute(output, "vknrc.resolution", fmt::format("{}x{}", extent.width, extent.height));
+	WriteStringAttribute(output, "vknrc.nee", settings.nee ? "on" : "off");
+	WriteAttributeHeader(output, "vknrc.maxBounces", "int", 4);
+	WriteValue(output, static_cast<int32_t>(settings.max_bounces));
+	if (settings.spp <= int_max) {
+		WriteAttributeHeader(output, "vknrc.spp", "int", 4);
+		WriteValue(output, static_cast<int32_t>(settings.spp));
+	} else {
+		// OpenEXR has no standard uint attribute. Binary64 exactly represents every uint32_t.
+		static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
+		WriteAttributeHeader(output, "vknrc.spp", "double", 8);
+		WriteValue(output, static_cast<double>(settings.spp));
+	}
+	WriteStringAttribute(output, "vknrc.left.method", left);
+	WriteStringAttribute(output, "vknrc.right.method", right);
+	WriteStringAttribute(output, "vknrc.scene", settings.scene_name);
+}
+
+// Minimal single-part, uncompressed scanline layout from
+// https://openexr.com/en/latest/OpenEXRFileLayout.html
+void WriteEXR(std::ostream &output, VkExtent3D extent, const float *rgba, const CaptureMetadata *metadata) {
+	capture_detail::Caption caption;
+	if (metadata && metadata->print_caption && !capture_detail::MakeCaption(caption, extent, *metadata)) {
+		output.setstate(std::ios::failbit);
+		return;
+	}
+	WriteValue(output, uint32_t{20000630}); // OpenEXR magic number
+	WriteValue(output, uint32_t{2});        // File version, no flags
+	// Each one-letter channel name takes two bytes, followed by four 32-bit fields.
+	WriteAttributeHeader(output, "channels", "chlist", 3 * (2 + 4 * 4) + 1);
+	for (char name : {'B', 'G', 'R'}) {
+		output << name << '\0';
+		WriteValue(output, int32_t{2}); // FLOAT
+		WriteValue(output, uint32_t{0}); // pLinear and three reserved bytes
+		WriteValue(output, int32_t{1}); // xSampling
+		WriteValue(output, int32_t{1}); // ySampling
+	}
+	output.put('\0');
+	WriteAttributeHeader(output, "compression", "compression", 1);
+	output.put('\0'); // NO_COMPRESSION
+	const std::array<int32_t, 4> window{0, 0, static_cast<int32_t>(extent.width - 1),
+	                                    static_cast<int32_t>(extent.height - 1)};
+	for (const char *name : {"dataWindow", "displayWindow"}) {
+		WriteAttributeHeader(output, name, "box2i", 16);
+		WriteValue(output, window);
+	}
+	WriteAttributeHeader(output, "lineOrder", "lineOrder", 1);
+	output.put('\0'); // INCREASING_Y
+	WriteAttributeHeader(output, "pixelAspectRatio", "float", 4);
+	WriteValue(output, 1.0f);
+	WriteAttributeHeader(output, "screenWindowCenter", "v2f", 8);
+	WriteValue(output, std::array<float, 2>{0.0f, 0.0f});
+	WriteAttributeHeader(output, "screenWindowWidth", "float", 4);
+	WriteValue(output, 1.0f);
+	if (metadata && metadata->write_header)
+		WriteCaptureMetadata(output, metadata->settings, extent);
+	output.put('\0'); // End of header
+
+	const auto header_bytes = static_cast<std::streamoff>(output.tellp());
+	if (header_bytes < 0) {
+		output.setstate(std::ios::failbit);
+		return;
+	}
+	// Each scanline chunk has a signed 32-bit y, byte count, and planar B/G/R data.
+	const int32_t row_bytes = static_cast<int32_t>(size_t{extent.width} * 3 * sizeof(float));
+	uint64_t offset = static_cast<uint64_t>(header_bytes) + uint64_t{extent.height} * sizeof(uint64_t);
+	for (uint32_t y = 0; y < extent.height; ++y) {
+		WriteValue(output, offset);
+		offset += 8u + static_cast<uint64_t>(row_bytes);
+	}
+	std::vector<float> row(size_t{extent.width} * 3);
+	for (uint32_t y = 0; y < extent.height && output; ++y) {
+		WriteValue(output, static_cast<int32_t>(y));
+		WriteValue(output, row_bytes);
+		const float *source = rgba + size_t{y} * extent.width * 4;
+		for (size_t x = 0; x < extent.width; ++x) {
+			row[x] = source[4 * x + 2];
+			row[extent.width + x] = source[4 * x + 1];
+			row[2 * size_t{extent.width} + x] = source[4 * x];
+		}
+		caption.CompositeRow(y, extent.width, row.data());
+		output.write(reinterpret_cast<const char *>(row.data()), row_bytes);
+	}
+}
+
+void WritePFM(std::ostream &output, VkExtent3D extent, const float *rgba) {
+	output << "PF\n" << extent.width << ' ' << extent.height << "\n-1.0\n";
+	std::vector<float> rgb_row(size_t{extent.width} * 3);
+	for (uint32_t row = extent.height; row > 0 && output; --row) {
+		const auto *source = rgba + size_t{row - 1} * extent.width * 4;
+		for (size_t x = 0; x < extent.width; ++x) {
+			rgb_row[x * 3] = source[x * 4];
+			rgb_row[x * 3 + 1] = source[x * 4 + 1];
+			rgb_row[x * 3 + 2] = source[x * 4 + 2];
+		}
+		output.write(reinterpret_cast<const char *>(rgb_row.data()),
+		             static_cast<std::streamsize>(rgb_row.size() * sizeof(float)));
+	}
+}
+
+bool CaptureAccumulation(const myvk::Ptr<myvk::Queue> &queue, const myvk::Ptr<myvk::ImageView> &image_view,
+                         const std::filesystem::path &filename, Format format, const CaptureMetadata *metadata = nullptr) {
 	if (!queue || !image_view || filename.empty()) {
 		spdlog::error("Capture requires a rendering queue, image view, and output filename");
 		return false;
@@ -47,6 +178,11 @@ bool CaptureAccumulationPFM(const myvk::Ptr<myvk::Queue> &queue,
 	    extent.depth != 1 || image->GetArrayLayers() != 1 || range.baseMipLevel != 0 || range.levelCount != 1 ||
 	    range.baseArrayLayer != 0 || range.layerCount != 1 || range.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT) {
 		spdlog::error("Capture requires a single-layer RGBA32F image with TRANSFER_SRC usage on the rendering device");
+		return false;
+	}
+	constexpr auto kMaxExrInt = std::numeric_limits<int32_t>::max();
+	if (format == Format::EXR && (extent.width > kMaxExrInt / (3 * sizeof(float)) || extent.height > kMaxExrInt)) {
+		spdlog::error("Capture extent exceeds OpenEXR scanline limits");
 		return false;
 	}
 	if (!CheckResult(device->WaitIdle(), "device wait"))
@@ -124,30 +260,41 @@ bool CaptureAccumulationPFM(const myvk::Ptr<myvk::Queue> &queue,
 		spdlog::error("Capture cannot create output directory: {}", directory_error.message());
 		return false;
 	}
+	const auto utf8 = filename.u8string();
+	const std::string name(utf8.begin(), utf8.end());
+	const bool new_exr = format == Format::EXR && !std::filesystem::exists(filename, directory_error) && !directory_error;
 	std::ofstream output(filename, std::ios::binary);
 	if (!output) {
-		spdlog::error("Capture cannot open {}", filename.string());
+		spdlog::error("Capture cannot open {}", name);
 		return false;
 	}
-	output << "PF\n" << extent.width << ' ' << extent.height << "\n-1.0\n";
 	const auto *rgba = static_cast<const float *>(mapped_info.pMappedData);
-	std::vector<float> rgb_row(size_t{extent.width} * 3);
-	for (uint32_t row = extent.height; row > 0; --row) {
-		const auto *source = rgba + size_t{row - 1} * extent.width * 4;
-		for (uint32_t x = 0; x < extent.width; ++x) {
-			rgb_row[size_t{x} * 3] = source[size_t{x} * 4];
-			rgb_row[size_t{x} * 3 + 1] = source[size_t{x} * 4 + 1];
-			rgb_row[size_t{x} * 3 + 2] = source[size_t{x} * 4 + 2];
-		}
-		// Preserve negative and nonfinite values so diagnostics can detect failures.
-		output.write(reinterpret_cast<const char *>(rgb_row.data()),
-		             static_cast<std::streamsize>(rgb_row.size() * sizeof(float)));
-	}
+	if (format == Format::EXR)
+		WriteEXR(output, extent, rgba, metadata);
+	else
+		WritePFM(output, extent, rgba);
 	output.close();
 	if (!output) {
-		spdlog::error("Capture failed while writing {}", filename.string());
+		spdlog::error("Capture failed while writing {}", name);
+		if (new_exr) {
+			std::error_code cleanup_error;
+			std::filesystem::remove(filename, cleanup_error);
+			if (cleanup_error)
+				spdlog::warn("Cannot remove incomplete capture {}: {}", name, cleanup_error.message());
+		}
 		return false;
 	}
-	spdlog::info("Captured {} x {} linear RGB radiance to {}", extent.width, extent.height, filename.string());
+	spdlog::info("Captured {} x {} linear RGB radiance to {}", extent.width, extent.height, name);
 	return true;
+}
+} // namespace
+
+bool CaptureAccumulationPFM(const myvk::Ptr<myvk::Queue> &queue, const myvk::Ptr<myvk::ImageView> &image_view,
+                            const std::filesystem::path &filename) {
+	return CaptureAccumulation(queue, image_view, filename, Format::PFM);
+}
+
+bool CaptureAccumulationEXR(const myvk::Ptr<myvk::Queue> &queue, const myvk::Ptr<myvk::ImageView> &image_view,
+                            const std::filesystem::path &filename, const CaptureMetadata *metadata) {
+	return CaptureAccumulation(queue, image_view, filename, Format::EXR, metadata);
 }

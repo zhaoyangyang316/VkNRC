@@ -15,6 +15,7 @@ struct SceneCamera {
 
 struct SceneCatalogEntry {
 	std::string label;
+	std::string name; // Friendly scene name or OBJ stem, independent of the dropdown path.
 	std::filesystem::path path;
 	bool is_cornell{false};
 	std::optional<SceneCamera> camera;

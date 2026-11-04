@@ -170,8 +170,10 @@ void LoadCameraSidecar(SceneCatalog &catalog, SceneCatalogEntry &entry) {
 		}
 		entry.camera = camera;
 	}
-	if (name)
+	if (name) {
+		entry.name = *name;
 		entry.label = std::move(*name);
+	}
 }
 
 void AddEntry(SceneCatalog &catalog, const fs::path &path, const fs::path &cornell_path, bool custom) {
@@ -188,7 +190,8 @@ void AddEntry(SceneCatalog &catalog, const fs::path &path, const fs::path &corne
 	} else {
 		label = Utf8(normalized) + " (custom)";
 	}
-	SceneCatalogEntry entry{.label = std::move(label), .path = normalized, .is_cornell = is_cornell};
+	SceneCatalogEntry entry{.label = std::move(label), .name = is_cornell ? "Cornell Box" : Utf8(normalized.stem()),
+	                        .path = normalized, .is_cornell = is_cornell};
 	LoadCameraSidecar(catalog, entry);
 	catalog.entries.push_back(std::move(entry));
 }

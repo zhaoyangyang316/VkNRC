@@ -3,8 +3,10 @@
 #include <myvk/ImGuiHelper.hpp>
 
 #include <spdlog/spdlog.h>
+#include <spdlog/fmt/chrono.h>
 
 #include <charconv>
+#include <chrono>
 #include <cmath>
 #include <string_view>
 #include "RenderCapture.hpp"
@@ -13,6 +15,26 @@
 #include "rg/NRCRenderGraph.hpp"
 
 constexpr uint32_t kFrameCount = 3, kWidth = 1280, kHeight = 720;
+
+static std::string SaveCurrentFrame(const myvk::Ptr<myvk::Queue> &queue,
+                                    const myvk::Ptr<myvk::ImageView> &image, const CaptureMetadata &metadata) {
+	std::error_code error;
+	const auto directory = std::filesystem::absolute("captures", error);
+	if (error)
+		return "Cannot locate the capture directory: " + error.message();
+	const auto now = std::chrono::system_clock::now();
+	const auto stamp = fmt::format("frame-{:%Y%m%d-%H%M%S}",
+	                               fmt::localtime(std::chrono::system_clock::to_time_t(now)));
+	auto path = directory / (stamp + ".exr");
+	for (unsigned copy = 2; std::filesystem::exists(path, error); ++copy)
+		path = directory / fmt::format("{}-{}.exr", stamp, copy);
+	if (error)
+		return "Cannot select a capture filename: " + error.message();
+
+	const bool saved = CaptureAccumulationEXR(queue, image, path, &metadata);
+	const auto utf8 = path.u8string();
+	return (saved ? "Saved " : "Could not save ") + std::string(utf8.begin(), utf8.end());
+}
 
 static void ResetSceneCamera(Camera &camera, const SceneCatalogEntry &entry) {
 	camera = Camera{};
@@ -114,7 +136,7 @@ int main(int argc, char **argv) {
 			return EXIT_FAILURE;
 		}
 	}
-	auto scene_catalog = DiscoverSceneCatalog(argv[0], custom_scene);
+	const auto scene_catalog = DiscoverSceneCatalog(argv[0], custom_scene);
 	auto initial_scene = custom_scene ? scene_catalog.custom_index : scene_catalog.default_index;
 	if (!initial_scene) {
 		spdlog::error("{}", scene_catalog.diagnostic);
@@ -242,9 +264,12 @@ int main(int argc, char **argv) {
 	rebuild_render_graphs();
 	std::array<myvk::Ptr<rg::PausedRenderGraph>, kFrameCount> paused_graphs;
 	myvk::Ptr<myvk::ImageView> last_rendered_image;
-	uint32_t last_rendered_spp = 0;
+	CaptureRenderSettings last_rendered_settings{};
 	bool paused = false;
 	std::string scene_error;
+	std::string capture_status;
+	bool include_capture_metadata = true;
+	bool print_capture_caption = false;
 	int view_max_bounces = static_cast<int>(max_bounces);
 
 	bool view_accumulate = vk_nrc_state->IsAccumulate();
@@ -293,12 +318,32 @@ int main(int argc, char **argv) {
 				paused = !paused;
 				if (!paused)
 					glfwGetCursorPos(window, &cam_control.prev_cursor_pos.x, &cam_control.prev_cursor_pos.y);
-				spdlog::info("Rendering {} at {} accumulated samples", paused ? "paused" : "resumed",
-				             paused ? last_rendered_spp : vk_nrc_state->GetAccumulateCount());
+				spdlog::info("Rendering {} at {} SPP", paused ? "paused" : "resumed", last_rendered_settings.spp);
 			}
+			if (last_rendered_image) {
+				if (ImGui::Button("Capture frame (EXR)")) {
+					const CaptureMetadata metadata{.settings = last_rendered_settings,
+					                               .write_header = include_capture_metadata,
+					                               .print_caption = print_capture_caption};
+					capture_status = SaveCurrentFrame(generic_queue, last_rendered_image, metadata);
+					// Disk I/O should not affect the next camera movement.
+					prev_time = glfwGetTime();
+					delta = 0.0;
+				}
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Save the displayed render as linear HDR RGB, before tone mapping and UI.");
+				ImGui::Checkbox("Include render metadata", &include_capture_metadata);
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Store this frame's scene name and render settings in the EXR header.");
+				ImGui::Checkbox("Print metadata in lower right", &print_capture_caption);
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Draw this frame's scene name and render settings into the saved EXR pixels.");
+			}
+			if (!capture_status.empty())
+				ImGui::TextWrapped("%s", capture_status.c_str());
 			if (paused) {
 				ImGui::TextUnformatted("Paused: image and training frozen");
-				ImGui::Text("SPP %u", last_rendered_spp);
+				ImGui::Text("SPP %u", last_rendered_settings.spp);
 			} else {
 				if (ImGui::Checkbox("Next event estimation", &view_use_nee) && vk_nrc_state->SetUseNEE(view_use_nee)) {
 					frame_manager->WaitIdle();
@@ -312,7 +357,6 @@ int main(int argc, char **argv) {
 					frame_manager->WaitIdle();
 					if (vk_nrc_state->SetIndirectOnly(view_indirect_only)) {
 						last_rendered_image.reset();
-						last_rendered_spp = 0;
 						spdlog::info("Indirect illumination only: {}", view_indirect_only ? "enabled" : "disabled");
 					}
 				}
@@ -473,7 +517,12 @@ int main(int argc, char **argv) {
 			// accumulation image and reset its count, which must remain zero.
 			if (!display_only) {
 				vk_nrc_state->NextFrame();
-				last_rendered_spp = vk_nrc_state->GetAccumulateCount();
+				last_rendered_settings = {.nee = vk_nrc_state->IsUseNEE(),
+				                          .left_method = vk_nrc_state->GetLeftMethod(),
+				                          .right_method = vk_nrc_state->GetRightMethod(),
+				                          .max_bounces = vk_nrc_state->GetMaxBounces(),
+				                          .spp = vk_nrc_state->GetRenderedSPP(),
+				                          .scene_name = scene_catalog.entries[scene_index].name};
 			}
 			frame_manager->Render();
 			if (compare && ++phase_frames == (comparison_phase == 0 ? warmup_frames : sample_frames)) {
@@ -500,7 +549,8 @@ int main(int argc, char **argv) {
 		}
 	}
 
-	frame_manager->WaitIdle();
+	// Presentation can still be using a semaphore after the last render fence signals.
+	device->WaitIdle();
 	glfwTerminate();
 	return exit_code;
 }
