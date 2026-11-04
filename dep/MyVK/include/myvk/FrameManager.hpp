@@ -34,6 +34,7 @@ private:
 	void initialize(const Ptr<Queue> &graphics_queue, const Ptr<PresentQueue> &present_queue, bool use_vsync,
 	                uint32_t frame_count, VkImageUsageFlags image_usage);
 	void recreate_swapchain();
+	void reset_swapchain_images();
 
 public:
 	static Ptr<FrameManager> Create(const Ptr<Queue> &graphics_queue, const Ptr<PresentQueue> &present_queue,

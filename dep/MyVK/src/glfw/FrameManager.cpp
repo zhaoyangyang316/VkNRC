@@ -11,39 +11,41 @@ void FrameManager::recreate_swapchain() {
 		glfwWaitEvents();
 	}
 
-	for (const auto &i : m_frame_fences)
-		i->Wait();
+	// Graphics fences do not cover outstanding presentation waits.
+	m_swapchain->GetDevicePtr()->WaitIdle();
 
 	m_swapchain = Swapchain::Create(m_swapchain);
-	m_swapchain_images = myvk::SwapchainImage::Create(m_swapchain);
-	m_swapchain_image_views.clear();
-	m_swapchain_image_views.resize(m_swapchain->GetImageCount());
-	for (uint32_t i = 0; i < m_swapchain->GetImageCount(); ++i)
-		m_swapchain_image_views[i] = myvk::ImageView::Create(m_swapchain_images[i]);
+	reset_swapchain_images();
 
 	if (m_resize_func)
 		m_resize_func(GetExtent());
 }
 
+void FrameManager::reset_swapchain_images() {
+	m_image_fences.assign(m_swapchain->GetImageCount(), nullptr);
+	m_swapchain_images = myvk::SwapchainImage::Create(m_swapchain);
+	m_swapchain_image_views.resize(m_swapchain->GetImageCount());
+	m_render_done_semaphores.resize(m_swapchain->GetImageCount());
+	for (uint32_t i = 0; i < m_swapchain->GetImageCount(); ++i) {
+		m_swapchain_image_views[i] = myvk::ImageView::Create(m_swapchain_images[i]);
+		// Reacquiring this image guarantees its previous presentation wait is complete.
+		m_render_done_semaphores[i] = Semaphore::Create(m_swapchain->GetDevicePtr());
+	}
+}
+
 void FrameManager::initialize(const Ptr<Queue> &graphics_queue, const Ptr<PresentQueue> &present_queue, bool use_vsync,
                               uint32_t frame_count, VkImageUsageFlags image_usage) {
 	m_swapchain = myvk::Swapchain::Create(graphics_queue, present_queue, use_vsync, image_usage);
-	m_swapchain_images = myvk::SwapchainImage::Create(m_swapchain);
-	m_swapchain_image_views.resize(m_swapchain->GetImageCount());
-	for (uint32_t i = 0; i < m_swapchain->GetImageCount(); ++i)
-		m_swapchain_image_views[i] = myvk::ImageView::Create(m_swapchain_images[i]);
+	reset_swapchain_images();
 
 	m_frame_count = frame_count;
-	m_image_fences.resize(m_swapchain->GetImageCount(), nullptr);
 
 	m_frame_fences.resize(frame_count);
-	m_render_done_semaphores.resize(frame_count);
 	m_acquire_done_semaphores.resize(frame_count);
 	m_frame_command_buffers.resize(frame_count);
 
 	for (uint32_t i = 0; i < frame_count; ++i) {
 		m_frame_fences[i] = Fence::Create(m_swapchain->GetDevicePtr(), VK_FENCE_CREATE_SIGNALED_BIT);
-		m_render_done_semaphores[i] = Semaphore::Create(m_swapchain->GetDevicePtr());
 		m_acquire_done_semaphores[i] = Semaphore::Create(m_swapchain->GetDevicePtr());
 		m_frame_command_buffers[i] = myvk::CommandBuffer::Create(myvk::CommandPool::Create(graphics_queue));
 	}
@@ -79,8 +81,8 @@ void FrameManager::Render() {
 	m_frame_fences[m_current_frame]->Reset();
 	m_frame_command_buffers[m_current_frame]->Submit(
 	    {{m_acquire_done_semaphores[m_current_frame], VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT}},
-	    {m_render_done_semaphores[m_current_frame]}, m_frame_fences[m_current_frame]);
-	VkResult result = m_swapchain->Present(m_current_image_index, {m_render_done_semaphores[m_current_frame]});
+	    {m_render_done_semaphores[m_current_image_index]}, m_frame_fences[m_current_frame]);
+	VkResult result = m_swapchain->Present(m_current_image_index, {m_render_done_semaphores[m_current_image_index]});
 	if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || m_resized) {
 		m_resized = false;
 		recreate_swapchain();

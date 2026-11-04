@@ -20,6 +20,8 @@ struct CaptureRenderSettings {
 	VkNRCState::Method left_method{}, right_method{};
 	uint32_t max_bounces{}, spp{};
 	std::string_view scene_name; // UTF-8; caller keeps the name alive through the capture.
+	bool fast_mode{};
+	float min_roughness{VkNRCState::GetDefaultMinRoughness()};
 };
 
 struct CaptureMetadata {

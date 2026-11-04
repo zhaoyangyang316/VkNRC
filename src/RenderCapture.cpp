@@ -65,6 +65,9 @@ void WriteCaptureMetadata(std::ostream &output, const CaptureRenderSettings &set
 	}
 	WriteStringAttribute(output, "vknrc.resolution", fmt::format("{}x{}", extent.width, extent.height));
 	WriteStringAttribute(output, "vknrc.nee", settings.nee ? "on" : "off");
+	WriteStringAttribute(output, "vknrc.fastMode", settings.fast_mode ? "on" : "off");
+	WriteAttributeHeader(output, "vknrc.minRoughness", "float", 4);
+	WriteValue(output, settings.min_roughness);
 	WriteAttributeHeader(output, "vknrc.maxBounces", "int", 4);
 	WriteValue(output, static_cast<int32_t>(settings.max_bounces));
 	if (settings.spp <= int_max) {

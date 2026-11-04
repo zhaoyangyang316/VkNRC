@@ -150,6 +150,14 @@ from accumulation or the cache.
 
 Controls:
 
+- **Render resolution** selects a fixed pixel grid for both sides of the
+  comparison. The default is 1280×720. Presets range from 640×360 to 3840×2160
+  and include 1024×1024. Only presets within the GPU's storage buffer limit
+  appear in the dropdown. The image scales to fit the window, with black bars
+  when the aspect ratios differ. Resizing the window preserves the camera
+  framing, accumulated samples, and capture dimensions. Changing the render
+  resolution starts a fresh accumulation and keeps the trained cache.
+  Use `--resolution 1920x1080` to select a preset at launch or in `--compare`.
 - **Fast mode** replaces the NRC path-footprint test with a material roughness
   threshold. NRC traces the first bounce explicitly, so direct lighting at the
   camera-visible surface comes from the path tracer. The first secondary hit
@@ -169,13 +177,15 @@ Controls:
   before tone mapping and the UI overlay. The panel shows the full file path
   under `captures` in the working directory. **Include render metadata** is on
   by default. The header records the resolution, NEE, max bounces, SPP, left
-  and right methods (**NRC**, **PT**, or **Cache**), and scene name. Labels
+  and right methods (**NRC**, **PT**, or **Cache**), scene name, Fast mode
+  (`vknrc.fastMode`, on/off), and its minimum roughness (`vknrc.minRoughness`, float). Labels
   are filled automatically. SPP counts the samples in the captured image:
   one with accumulation off, the number collected so far during warm-up, and
   at most the selected window size for rolling accumulation.
-  Enable **Print metadata in lower right** to draw those same fields
-  on a dark panel in the bottom-right corner of the saved image. This option
-  is off by default and can be used independently of the EXR header metadata.
+  Enable **Print metadata in lower right** to draw the frame settings on a dark
+  panel in the bottom-right corner of the saved image. The caption shows the
+  roughness threshold when Fast mode is on. This option is off by default and
+  can be used independently of the EXR header metadata.
 - **Indirect illumination only:** show illumination that has scattered at least
   twice before reaching the camera. This removes visible emitter emission and
   background, direct-light samples at the primary surface, and emitter/environment
@@ -191,8 +201,8 @@ Controls:
   `--no-nee` to disable it from the command line, including in `--compare` mode.
 - **Pause rendering / Resume rendering:** freeze the image, path tracing, cache
   training and sample count while keeping the UI responsive. Camera and rendering
-  settings are inactive until resumed. Resizing displays the frozen image with its
-  original aspect ratio and resets accumulation for the next rendered frame.
+  settings are inactive until resumed. Resizing fits the frozen image to the
+  window while preserving its aspect ratio and sample count.
 - **Max bounces:** set the trace limit from 1 to 64 (default 64). Changing it resets
   accumulation and retrains the cache. It counts explicitly traced surface vertices,
   including the primary hit; 1 shows only directly visible emission/background.
@@ -205,7 +215,7 @@ Controls:
   collected so far. This is a finite sliding window, not an exponential average.
   **0** averages all samples since the last reset (when **Accumulate** is enabled).
   Changing the window or clicking **Restart accumulation** clears sample history
-  while preserving the trained cache. Camera, scene, viewport and rendering-setting
+  while preserving the trained cache. Camera, scene, render-resolution and rendering-setting
   changes also clear history. **Accumulate** off shows only the current sample;
   turning it back on starts a fresh history with the selected window.
   Use `--accumulate-last 4` (or the compatibility alias `--max-spp 4`) to start

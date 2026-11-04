@@ -16,6 +16,7 @@
 #include <deque>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
@@ -44,6 +45,21 @@ void Check(VkResult result, const char *operation) {
 	Require(result == VK_SUCCESS, std::string(operation) + " failed: " + std::to_string(result));
 }
 
+std::vector<float> ReadPFM(const std::filesystem::path &filename, VkExtent2D extent) {
+	std::ifstream input(filename, std::ios::binary);
+	std::string magic;
+	uint32_t width = 0, height = 0;
+	float scale = 0;
+	input >> magic >> width >> height >> scale;
+	input.get();
+	Require(magic == "PF" && width == extent.width && height == extent.height && scale == -1.0f,
+	        "Unexpected PFM header: " + filename.string());
+	std::vector<float> pixels(size_t(width) * height * 3);
+	input.read(reinterpret_cast<char *>(pixels.data()), std::streamsize(pixels.size() * sizeof(float)));
+	Require(bool(input), "Incomplete PFM capture: " + filename.string());
+	return pixels;
+}
+
 class TestGraph final : public myvk_rg::RenderGraphBase {
 	myvk::Ptr<VkNRCState> m_state;
 
@@ -60,18 +76,40 @@ public:
 		source->SetDstAccessFlags(VK_ACCESS_2_TRANSFER_WRITE_BIT);
 		auto accumulate = CreateResource<myvk_rg::InputImage>({"accumulate"}, state->GetAccumulateImageView());
 		auto history = CreateResource<myvk_rg::InputImage>({"history"}, state->GetHistoryImageView());
-		auto output = CreateResource<myvk_rg::ManagedImage>({"output"}, VK_FORMAT_R32G32B32A32_SFLOAT);
 		auto pass = CreatePass<rg::ScreenPass>(
 		    {"screen"}, rg::ScreenPass::Args{.nrc_state_ptr = m_state,
 		                                    .accumulate_image = accumulate->Alias(),
 		                                    .history_image = history->Alias(),
-		                                    .color_image = source->Alias(),
-		                                    .screen_image = output->Alias()});
-		AddResult({"output"}, pass->GetScreenOutput());
+		                                    .color_image = source->Alias()});
+		AddResult({"output"}, pass->GetAccumulateOutput());
 	}
 	void PreExecute() const final {
 		GetResource<myvk_rg::InputImage>({"accumulate"})->SetVkImageView(m_state->GetAccumulateImageView());
 		GetResource<myvk_rg::InputImage>({"history"})->SetVkImageView(m_state->GetHistoryImageView());
+	}
+};
+
+class TestPresentGraph final : public myvk_rg::RenderGraphBase {
+public:
+	TestPresentGraph(const myvk::Ptr<myvk::Device> &device, const myvk::Ptr<myvk::ImageView> &frame,
+	                 const myvk::Ptr<myvk::ImageView> &target) : RenderGraphBase(device) {
+		auto source = CreateResource<myvk_rg::InputImage>({"linear"}, frame);
+		source->SetSyncType(myvk_rg::ExternalSyncType::kCustom);
+		source->SetSrcLayout(VK_IMAGE_LAYOUT_GENERAL);
+		source->SetDstLayout(VK_IMAGE_LAYOUT_GENERAL);
+		source->SetSrcPipelineStages(VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+		source->SetSrcAccessFlags(VK_ACCESS_2_MEMORY_WRITE_BIT);
+		source->SetDstPipelineStages(VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+		source->SetDstAccessFlags(VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
+		auto output = CreateResource<myvk_rg::InputImage>({"target"}, target);
+		output->SetSyncType(myvk_rg::ExternalSyncType::kCustom);
+		output->SetSrcLayout(VK_IMAGE_LAYOUT_UNDEFINED);
+		output->SetDstLayout(VK_IMAGE_LAYOUT_GENERAL);
+		output->SetDstPipelineStages(VK_PIPELINE_STAGE_2_TRANSFER_BIT);
+		output->SetDstAccessFlags(VK_ACCESS_2_TRANSFER_READ_BIT);
+		auto present = CreatePass<rg::PresentScreenPass>(
+		    {"present"}, rg::PresentScreenPass::Args{.linear_image = source->Alias(), .screen_image = output->Alias()});
+		AddResult({"screen"}, present->GetScreenOutput());
 	}
 };
 
@@ -130,17 +168,7 @@ public:
 	void CheckCapture(const std::string &label) {
 		Require(!m_reference.empty(), "No reference sample");
 		Require(CaptureAccumulationPFM(m_queue, state->GetAccumulateImageView(), m_capture), "Capture failed");
-		std::ifstream input(m_capture, std::ios::binary);
-		std::string magic;
-		uint32_t width = 0, height = 0;
-		float scale = 0;
-		input >> magic >> width >> height >> scale;
-		input.get();
-		Require(magic == "PF" && width == m_extent.width && height == m_extent.height && scale == -1.0f,
-		        "Unexpected PFM header");
-		std::vector<float> actual(size_t(width) * height * 3);
-		input.read(reinterpret_cast<char *>(actual.data()), std::streamsize(actual.size() * sizeof(float)));
-		Require(bool(input), "Incomplete PFM capture");
+		const auto actual = ReadPFM(m_capture, m_extent);
 		std::array<double, 3> expected{};
 		for (const RGB &sample : m_reference)
 			for (unsigned c = 0; c < 3; ++c)
@@ -201,6 +229,70 @@ public:
 		++m_asserted_frames;
 	}
 	uint32_t AssertedFrames() const { return m_asserted_frames; }
+	std::vector<float> PresentFrame(VkExtent2D output_extent, const std::string &label) {
+		const auto source = state->GetAccumulateImageView(), history = state->GetHistoryImageView();
+		const auto spp = state->GetRenderedSPP(), index = state->GetHistoryWriteIndex(), seed = state->GetSeed();
+		const auto &device = m_queue->GetDevicePtr();
+		auto target = myvk::ImageView::Create(myvk::Image::CreateTexture2D(
+		    device, output_extent, 1, VK_FORMAT_R32G32B32A32_SFLOAT,
+		    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT), VK_IMAGE_VIEW_TYPE_2D);
+		auto graph = myvk::MakePtr<TestPresentGraph>(device, source, target);
+		graph->SetCanvasSize(output_extent);
+		auto command = myvk::CommandBuffer::Create(myvk::CommandPool::Create(m_queue));
+		Check(command->Begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT), "presentation command begin");
+		graph->CmdExecute(command);
+		Check(command->End(), "presentation command end");
+		auto fence = myvk::Fence::Create(device);
+		Check(command->Submit(fence), "presentation submit");
+		Check(fence->Wait(), "presentation wait");
+		Require(source == state->GetAccumulateImageView() && history == state->GetHistoryImageView() &&
+		            spp == state->GetRenderedSPP() && index == state->GetHistoryWriteIndex() && seed == state->GetSeed(),
+		        "Presentation changed render state");
+		const auto path = m_capture.parent_path() / (label + ".pfm");
+		Require(CaptureAccumulationPFM(m_queue, target, path), "Presentation readback failed");
+		return ReadPFM(path, output_extent);
+	}
+	void CheckPresentationFit() {
+		const auto dir = m_capture.parent_path();
+		const auto linear = ReadPFM(dir / "capture.pfm", m_extent);
+		const auto filmic = [](double x) {
+			const double a = 1.425 * x + 0.05;
+			return (x * a + 0.004) / (x * (a + 0.55) + 0.0491) - 0.0821;
+		};
+		// A 13x5 frame at native size, uniform 2x, pillarbox, letterbox and fractional downscale.
+		for (VkExtent2D output : std::array<VkExtent2D, 5>{{{13, 5}, {26, 10}, {52, 10}, {26, 30}, {7, 3}}}) {
+			const auto label = "present-" + std::to_string(output.width) + "x" + std::to_string(output.height);
+			const auto presented = PresentFrame(output, label);
+			const double scale = std::min(double(output.width) / m_extent.width, double(output.height) / m_extent.height);
+			const double left = (output.width - m_extent.width * scale) * 0.5;
+			const double top = (output.height - m_extent.height * scale) * 0.5;
+			for (uint32_t y = 0; y < output.height; ++y) {
+				for (uint32_t x = 0; x < output.width; ++x) {
+					const int sx = int(std::floor((x + 0.5 - left) / scale));
+					const int sy = int(std::floor((y + 0.5 - top) / scale));
+					const bool inside = sx >= 0 && sx < int(m_extent.width) && sy >= 0 && sy < int(m_extent.height);
+					for (unsigned c = 0; c < 3; ++c) {
+						// PFM stores bottom row first, while the viewport starts at the top.
+						double expected = 0;
+						if (inside) {
+							const float radiance = linear[3 * ((m_extent.height - 1 - sy) * m_extent.width + sx) + c];
+							expected = std::pow(std::max(0.0, filmic(radiance) / filmic(3.2)), 1.0 / 2.2);
+						}
+						const float actual = presented[3 * ((output.height - 1 - y) * output.width + x) + c];
+						if (!std::isfinite(actual) || std::abs(expected - actual) > (inside ? 2e-5 : 0.0))
+							throw std::runtime_error(label + " mismatch at " + std::to_string(x) + "," +
+							                         std::to_string(y) + ", channel " + std::to_string(c));
+					}
+				}
+			}
+		}
+		const auto retained = dir / "capture-after-present.exr";
+		Require(CaptureAccumulationEXR(m_queue, state->GetAccumulateImageView(), retained), "Retained EXR failed");
+		// The deterministic writer includes the extent and unmodified linear pixels in both files.
+		std::ifstream before(dir / "capture.exr", std::ios::binary), after(retained, std::ios::binary);
+		using Bytes = std::istreambuf_iterator<char>;
+		Require(before && after && std::equal(Bytes(before), Bytes{}, Bytes(after), Bytes{}), "Presentation altered the EXR");
+	}
 	void CaptureSPP(const char *filename) {
 		const uint32_t spp = state->GetRenderedSPP();
 		Require(spp == m_reference.size(), "Capture SPP differs from the number of contributing frames");
@@ -244,10 +336,12 @@ public:
 		Require(CaptureAccumulationEXR(m_queue, accumulated, m_capture.parent_path() / "capture.exr"), "Pattern EXR failed");
 		const CaptureMetadata nee_on{
 		    .settings = {.nee = true, .left_method = VkNRCState::kNone, .right_method = VkNRCState::kNRC,
-		                 .max_bounces = 64, .spp = 1, .scene_name = "Ajar \xE7\x81\xAF"}}; // UTF-8 U+706F
+		                 .max_bounces = 64, .spp = 1, .scene_name = "Ajar \xE7\x81\xAF", // UTF-8 U+706F
+		                 .fast_mode = true, .min_roughness = 0.375f}};
 		const CaptureMetadata nee_off{
 		    .settings = {.nee = false, .left_method = VkNRCState::kCache, .right_method = VkNRCState::kNone,
-		                 .max_bounces = 3, .spp = 1, .scene_name = "HDR pattern"}};
+		                 .max_bounces = 3, .spp = 1, .scene_name = "HDR pattern",
+		                 .fast_mode = false, .min_roughness = 0.875f}};
 		Require(CaptureAccumulationEXR(m_queue, accumulated, m_capture.parent_path() / "capture-nee-on.exr", &nee_on),
 		        "Pattern EXR with NEE-on metadata failed");
 		Require(CaptureAccumulationEXR(m_queue, accumulated, m_capture.parent_path() / "capture-nee-off.exr", &nee_off),
@@ -260,11 +354,14 @@ public:
 		const auto dir = m_capture.parent_path();
 		CaptureMetadata caption{
 		    .settings = {.nee = true, .left_method = VkNRCState::kNone, .right_method = VkNRCState::kNRC,
-		                 .max_bounces = 32, .spp = state->GetRenderedSPP(), .scene_name = "Flat HDR fixture"},
+		                 .max_bounces = 32, .spp = state->GetRenderedSPP(), .scene_name = "Flat HDR fixture",
+		                 .fast_mode = true, .min_roughness = 0.375f},
 		    .write_header = true, .print_caption = true};
 		Require(CaptureAccumulationEXR(m_queue, image, dir / "caption-with-header.exr", &caption), "Caption and header failed");
 		caption.write_header = false;
 		Require(CaptureAccumulationEXR(m_queue, image, dir / "caption-only.exr", &caption), "Caption only failed");
+		caption.settings.fast_mode = false;
+		Require(CaptureAccumulationEXR(m_queue, image, dir / "caption-fast-off.exr", &caption), "Fast-off caption failed");
 		// Capturing the original last also checks that the caption did not modify the GPU image.
 		Require(CaptureAccumulationEXR(m_queue, image, dir / "caption-plain.exr"), "Plain frame after caption failed");
 	}
@@ -314,8 +411,10 @@ int main(int argc, char **argv) {
 		test.Resize({13, 5});
 		for (unsigned i = 0; i < 11; ++i) {
 			test.Render({float(i), 0.25f, float(i % 3)}, "resize resets history");
-			if (i == 1)
+			if (i == 1) {
 				test.CaptureSPP("spp-partial.exr");
+				test.PresentFrame({24, 12}, "present-partial-history"); // Next render checks the retained samples.
+			}
 		}
 		test.CaptureSPP("spp-full.exr");
 		pass("resize rebuilds and resets history");
@@ -340,6 +439,8 @@ int main(int argc, char **argv) {
 		pass("unlimited to finite window resets history");
 		test.CapturePatternPair();
 		pass("export asymmetric 13x5 linear HDR frame to PFM and EXR with and without metadata");
+		test.CheckPresentationFit();
+		pass("presentation fits five extents, preserves linear EXR, rolling history, SPP and RNG");
 		test.CaptureCaptionVariants();
 		pass("export caption and header, caption only, and untouched HDR reference");
 		Check(device->WaitIdle(), "final wait");

@@ -15,7 +15,6 @@ using screen_pass::PushConstant_Data;
 
 ScreenPass::ScreenPass(myvk_rg::Parent parent, const Args &args)
     : myvk_rg::GraphicsPassBase(parent), m_nrc_state_ptr(args.nrc_state_ptr) {
-	AddColorAttachmentInput<myvk_rg::Usage::kColorAttachmentW>(0, {"screen"}, args.screen_image);
 	AddInputAttachmentInput(0, {0}, {"color"}, args.color_image);
 	AddDescriptorInput<myvk_rg::Usage::kStorageImageRW, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT>({1}, {"accumulate"},
 	                                                                                             args.accumulate_image);
@@ -53,7 +52,7 @@ myvk::Ptr<myvk::GraphicsPipeline> ScreenPass::CreatePipeline() const {
 	pipeline_state.m_rasterization_state.Initialize(VK_POLYGON_MODE_FILL, VK_FRONT_FACE_COUNTER_CLOCKWISE,
 	                                                VK_CULL_MODE_FRONT_BIT);
 	pipeline_state.m_multisample_state.Enable(VK_SAMPLE_COUNT_1_BIT);
-	pipeline_state.m_color_blend_state.Enable(1, VK_FALSE);
+	pipeline_state.m_color_blend_state.Enable(0, VK_FALSE);
 
 	return myvk::GraphicsPipeline::Create(pipeline_layout, GetVkRenderPass(), shader_stages, pipeline_state,
 	                                      GetSubpass());
@@ -71,14 +70,14 @@ void ScreenPass::CmdExecute(const myvk::Ptr<myvk::CommandBuffer> &command_buffer
 	command_buffer->CmdDraw(3, 1, 0, 0);
 }
 
-PausedScreenPass::PausedScreenPass(myvk_rg::Parent parent, const Args &args)
+PresentScreenPass::PresentScreenPass(myvk_rg::Parent parent, const Args &args)
     : myvk_rg::GraphicsPassBase(parent) {
 	AddColorAttachmentInput<myvk_rg::Usage::kColorAttachmentW>(0, {"screen"}, args.screen_image);
 	AddDescriptorInput<myvk_rg::Usage::kStorageImageR, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT>(
-	    {0}, {"frozen"}, args.frozen_image);
+	    {0}, {"linear"}, args.linear_image);
 }
 
-myvk::Ptr<myvk::GraphicsPipeline> PausedScreenPass::CreatePipeline() const {
+myvk::Ptr<myvk::GraphicsPipeline> PresentScreenPass::CreatePipeline() const {
 	auto &device = GetRenderGraphPtr()->GetDevicePtr();
 	auto pipeline_layout = myvk::PipelineLayout::Create(
 	    device, {GetVkDescriptorSetLayout()}, {{VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(VkExtent2D)}});
@@ -108,7 +107,7 @@ myvk::Ptr<myvk::GraphicsPipeline> PausedScreenPass::CreatePipeline() const {
 	                                      GetSubpass());
 }
 
-void PausedScreenPass::CmdExecute(const myvk::Ptr<myvk::CommandBuffer> &command_buffer) const {
+void PresentScreenPass::CmdExecute(const myvk::Ptr<myvk::CommandBuffer> &command_buffer) const {
 	auto extent = GetRenderGraphPtr()->GetCanvasSize();
 	command_buffer->CmdBindPipeline(GetVkPipeline());
 	command_buffer->CmdBindDescriptorSets({GetVkDescriptorSet()}, GetVkPipeline());

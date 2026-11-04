@@ -15,7 +15,7 @@ class ScreenPass final : public myvk_rg::GraphicsPassBase {
 public:
 	struct Args {
 		const myvk::Ptr<VkNRCState> &nrc_state_ptr;
-		const myvk_rg::Image &accumulate_image, &history_image, &color_image, &screen_image;
+		const myvk_rg::Image &accumulate_image, &history_image, &color_image;
 	};
 
 private:
@@ -26,17 +26,17 @@ public:
 	inline ~ScreenPass() final = default;
 	myvk::Ptr<myvk::GraphicsPipeline> CreatePipeline() const final;
 	void CmdExecute(const myvk::Ptr<myvk::CommandBuffer> &command_buffer) const final;
-	inline auto GetScreenOutput() const { return MakeImageOutput({"screen"}); }
+	inline auto GetAccumulateOutput() const { return MakeImageOutput({"accumulate"}); }
 };
 
-class PausedScreenPass final : public myvk_rg::GraphicsPassBase {
+class PresentScreenPass final : public myvk_rg::GraphicsPassBase {
 public:
 	struct Args {
-		const myvk_rg::Image &frozen_image, &screen_image;
+		const myvk_rg::Image &linear_image, &screen_image;
 	};
 
-	PausedScreenPass(myvk_rg::Parent parent, const Args &args);
-	~PausedScreenPass() final = default;
+	PresentScreenPass(myvk_rg::Parent parent, const Args &args);
+	~PresentScreenPass() final = default;
 	myvk::Ptr<myvk::GraphicsPipeline> CreatePipeline() const final;
 	void CmdExecute(const myvk::Ptr<myvk::CommandBuffer> &command_buffer) const final;
 	inline auto GetScreenOutput() const { return MakeImageOutput({"screen"}); }

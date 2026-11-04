@@ -106,7 +106,9 @@ inline bool MakeCaption(Caption &caption, VkExtent3D extent, const CaptureMetada
 	    FitLine(*font, limit, {"Resolution: ", fmt::format("{}x{}", w, h), "  |  NEE: ", settings.nee ? "on" : "off"}),
 	    FitLine(*font, limit, {fmt::format("Max bounces: {}  |  SPP: {}", settings.max_bounces, settings.spp)}),
 	    FitLine(*font, limit, {"Left: ", left, "  |  Right: ", right}),
-	    FitLine(*font, limit, {"Scene: ", settings.scene_name})};
+	    FitLine(*font, limit, {"Scene: ", settings.scene_name}),
+	    FitLine(*font, limit, {settings.fast_mode ? fmt::format("Fast mode: on  |  Min roughness: {}", settings.min_roughness)
+	                                              : "Fast mode: off"})};
 	for (const auto &line : lines)
 		caption.width = std::max(caption.width, line.width + 2 * pad);
 	constexpr int line_pitch = 18;

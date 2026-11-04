@@ -12,7 +12,6 @@
 #include "VBufferPass.hpp"
 
 #include <myvk_rg/pass/ImGuiPass.hpp>
-#include <myvk_rg/pass/ImageBlitPass.hpp>
 #include <myvk_rg/resource/AccelerationStructure.hpp>
 #include <myvk_rg/resource/InputBuffer.hpp>
 #include <myvk_rg/resource/InputImage.hpp>
@@ -20,25 +19,24 @@
 
 namespace rg {
 
-PausedRenderGraph::PausedRenderGraph(const myvk::Ptr<myvk::FrameManager> &frame_manager,
-                                   const myvk::Ptr<myvk::ImageView> &frozen_image)
+PresentRenderGraph::PresentRenderGraph(const myvk::Ptr<myvk::FrameManager> &frame_manager,
+                                       const myvk::Ptr<myvk::ImageView> &linear_image)
     : RenderGraphBase(frame_manager->GetDevicePtr()) {
-	auto frozen = CreateResource<myvk_rg::InputImage>({"frozen"}, frozen_image);
-	// The preceding writer belongs to NRCRenderGraph, so a read-only graph's
-	// kLastFrame inference would not provide the required write-to-read barrier.
-	frozen->SetSyncType(myvk_rg::ExternalSyncType::kCustom);
-	frozen->SetSrcLayout(VK_IMAGE_LAYOUT_GENERAL);
-	frozen->SetDstLayout(VK_IMAGE_LAYOUT_GENERAL);
-	frozen->SetSrcPipelineStages(VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
-	frozen->SetSrcAccessFlags(VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
-	frozen->SetDstPipelineStages(VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
-	frozen->SetDstAccessFlags(VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+	auto linear = CreateResource<myvk_rg::InputImage>({"linear"}, linear_image);
+	// The offscreen fragment pass writes this image. Make the write visible
+	// here, and finish this read before the next frame updates the same image.
+	linear->SetSyncType(myvk_rg::ExternalSyncType::kCustom);
+	linear->SetSrcLayout(VK_IMAGE_LAYOUT_GENERAL);
+	linear->SetDstLayout(VK_IMAGE_LAYOUT_GENERAL);
+	linear->SetSrcPipelineStages(VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+	linear->SetSrcAccessFlags(VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+	linear->SetDstPipelineStages(VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+	linear->SetDstAccessFlags(VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
 
 	auto swapchain_image = CreateResource<myvk_rg::SwapchainImage>({"swapchain_image"}, frame_manager);
 	swapchain_image->SetLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE);
-	auto screen_pass = CreatePass<PausedScreenPass>(
-	    {"paused_screen"}, PausedScreenPass::Args{.frozen_image = frozen->Alias(),
-	                                             .screen_image = swapchain_image->Alias()});
+	auto screen_pass = CreatePass<PresentScreenPass>(
+	    {"present_screen"}, PresentScreenPass::Args{.linear_image = linear->Alias(), .screen_image = swapchain_image->Alias()});
 	auto imgui_pass = CreatePass<myvk_rg::ImGuiPass>({"imgui_pass"}, screen_pass->GetScreenOutput());
 	AddResult({"present"}, imgui_pass->GetImageOutput());
 }
@@ -102,17 +100,12 @@ NRCRenderGraph::NRCRenderGraph(const myvk::Ptr<myvk::FrameManager> &frame_manage
 		                  .batch_train_records = nn_inference_pass->Get()->GetBatchTrainRecordsOutput(b)});
 	}
 
-	auto swapchain_image = CreateResource<myvk_rg::SwapchainImage>({"swapchain_image"}, frame_manager);
-	swapchain_image->SetLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE);
-
 	auto screen_pass = CreatePass<ScreenPass>(
 	    {"screen_pass"}, ScreenPass::Args{.nrc_state_ptr = m_nrc_state_ptr,
 	                                      .accumulate_image = nrc_resources.accumulate,
 	                                      .history_image = nrc_resources.history,
-	                                      .color_image = nn_inference_pass->Get()->GetColorOutput(),
-	                                      .screen_image = swapchain_image->Alias()});
-	auto imgui_pass = CreatePass<myvk_rg::ImGuiPass>({"imgui_pass"}, screen_pass->GetScreenOutput());
-	AddResult({"present"}, imgui_pass->GetImageOutput());
+	                                      .color_image = nn_inference_pass->Get()->GetColorOutput()});
+	AddResult({"linear_frame"}, screen_pass->GetAccumulateOutput());
 
 	auto final_train_pass = GetPass<NNTrain>({"nn_train_pass", VkNRCState::GetTrainBatchCount() - 1});
 	AddResult({"weights"}, final_train_pass->GetWeightOutput());

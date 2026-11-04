@@ -14,7 +14,17 @@
 
 #include "rg/NRCRenderGraph.hpp"
 
-constexpr uint32_t kFrameCount = 3, kWidth = 1280, kHeight = 720;
+constexpr uint32_t kFrameCount = 3, kWindowWidth = 1280, kWindowHeight = 720;
+
+struct ResolutionPreset {
+	const char *label;
+	VkExtent2D extent;
+};
+constexpr ResolutionPreset kResolutions[] = {
+    {"640x360", {640, 360}},       {"960x540", {960, 540}},    {"1280x720", {1280, 720}},
+    {"1024x1024", {1024, 1024}},   {"1920x1080", {1920, 1080}}, {"2560x1440", {2560, 1440}},
+    {"3840x2160", {3840, 2160}},
+};
 
 static std::string SaveCurrentFrame(const myvk::Ptr<myvk::Queue> &queue,
                                     const myvk::Ptr<myvk::ImageView> &image, const CaptureMetadata &metadata) {
@@ -56,11 +66,14 @@ static void ResetSceneCamera(Camera &camera, const SceneCatalogEntry &entry) {
 
 int main(int argc, char **argv) {
 	const auto print_usage = [] {
-		spdlog::info("Usage: VkNRC [scene.obj] [--camera x y z] [--fov degrees] [--max-bounces 1..64] "
+		spdlog::info("Usage: VkNRC [scene.obj] [--resolution WIDTHxHEIGHT] [--camera x y z] [--fov degrees] [--max-bounces 1..64] "
 		             "[--accumulate-last samples] [--no-nee] [--indirect-only] [--fast-mode] "
 		             "[--min-roughness 0..1] [--compare output-directory] "
 		             "[--warmup frames] [--samples frames] [--seed number]");
 		spdlog::info("Without a scene argument, opens the bundled Cornell box. Choose other assets in the Scene list.");
+		spdlog::info("Fixed render resolution (default 1280x720). Available presets:");
+		for (const auto &preset : kResolutions)
+			spdlog::info("  {}", preset.label);
 		spdlog::info("Accumulate last: 0 = all samples (default); 1..64 = rolling window, rendering continues. "
 		             "--max-spp is an alias. In --compare, --samples sets the frames rendered per capture.");
 		spdlog::info("Next event estimation is enabled by default; --no-nee disables it for comparison.");
@@ -79,6 +92,7 @@ int main(int argc, char **argv) {
 	float camera_fov{};
 	bool override_position = false, override_fov = false;
 	std::filesystem::path comparison_directory;
+	const ResolutionPreset *resolution = &kResolutions[2];
 	uint32_t warmup_frames = 2048, sample_frames = 1024, comparison_seed = 1337;
 	uint32_t max_bounces = VkNRCState::GetDefaultMaxBounces();
 	uint32_t accumulation_window = 0;
@@ -110,6 +124,15 @@ int main(int argc, char **argv) {
 			}
 			camera_fov = glm::radians(degrees);
 			override_fov = true;
+		} else if (option == "--resolution" && i < argc) {
+			const std::string_view size = argv[i++];
+			const auto *preset = std::find_if(std::begin(kResolutions), std::end(kResolutions),
+			                                  [size](const auto &entry) { return size == entry.label; });
+			if (preset == std::end(kResolutions)) {
+				spdlog::error("Unknown render resolution '{}'. See --help for the presets.", size);
+				return EXIT_FAILURE;
+			}
+			resolution = preset;
 		} else if (option == "--max-bounces" && i < argc) {
 			if (!parse_uint(argv[i++], max_bounces) || max_bounces < 1 ||
 			    max_bounces > VkNRCState::GetMaxSupportedBounces()) {
@@ -168,7 +191,7 @@ int main(int argc, char **argv) {
 	spdlog::info("Scene: {}", scene_catalog.entries[scene_index].path.string());
 	spdlog::info("Loaded {} Vertices, {} Texcoords, {} Materials, {} Instances", scene.GetVertices().size(),
 	             scene.GetTexcoords().size(), scene.GetMaterials().size(), scene.GetInstances().size());
-	GLFWwindow *window = myvk::GLFWCreateWindow("VkNRC", kWidth, kHeight, comparison_directory.empty());
+	GLFWwindow *window = myvk::GLFWCreateWindow("VkNRC", kWindowWidth, kWindowHeight, comparison_directory.empty());
 
 	auto instance = myvk::Instance::CreateWithGlfwExtensions();
 	myvk::Ptr<myvk::Queue> generic_queue, compute_queue;
@@ -234,7 +257,15 @@ int main(int argc, char **argv) {
 	             vk_scene->HasEmissiveSurfaces() ? "emissive surface present" : "no emissive surfaces");
 	auto vk_scene_blas = myvk::MakePtr<VkSceneBLAS>(vk_scene);
 	auto vk_scene_tlas = myvk::MakePtr<VkSceneTLAS>(vk_scene_blas);
-	auto vk_nrc_state = myvk::MakePtr<VkNRCState>(generic_queue, VkExtent2D{kWidth, kHeight});
+	const auto supports_resolution = [&](VkExtent2D extent) {
+		return VkNRCState::GetEvalRecordBufferSize(extent) <= physical_device->GetProperties().vk10.limits.maxStorageBufferRange;
+	};
+	if (!supports_resolution(resolution->extent)) {
+		spdlog::error("Render resolution {} exceeds the GPU's storage buffer limit", resolution->label);
+		return EXIT_FAILURE;
+	}
+	auto vk_nrc_state = myvk::MakePtr<VkNRCState>(generic_queue, resolution->extent);
+	spdlog::info("Render resolution: {}", resolution->label);
 	vk_nrc_state->SetMaxBounces(max_bounces);
 	vk_nrc_state->SetUseNEE(use_nee);
 	vk_nrc_state->SetIndirectOnly(indirect_only);
@@ -266,21 +297,24 @@ int main(int argc, char **argv) {
 	int exit_code = EXIT_SUCCESS;
 
 	auto frame_manager = myvk::FrameManager::Create(generic_queue, present_queue, false, kFrameCount);
-	frame_manager->SetResizeFunc([&](VkExtent2D extent) {
-		vk_nrc_state->ResetAccumulateImage(extent);
-		vk_nrc_state->ResetAccumulateCount();
-	});
 	std::array<myvk::Ptr<rg::NRCRenderGraph>, kFrameCount> render_graphs;
 	const auto rebuild_render_graphs = [&] {
 		for (auto &graph : render_graphs)
 			graph = myvk::MakePtr<rg::NRCRenderGraph>(frame_manager, vk_scene_tlas, vk_nrc_state, camera);
 	};
 	rebuild_render_graphs();
-	std::array<myvk::Ptr<rg::PausedRenderGraph>, kFrameCount> paused_graphs;
+	std::array<myvk::Ptr<rg::PresentRenderGraph>, kFrameCount> present_graphs;
+	const auto rebuild_present_graphs = [&] {
+		for (auto &graph : present_graphs)
+			graph = myvk::MakePtr<rg::PresentRenderGraph>(frame_manager, vk_nrc_state->GetAccumulateImageView());
+	};
+	rebuild_present_graphs();
+	frame_manager->SetResizeFunc([&](VkExtent2D) { rebuild_present_graphs(); });
 	myvk::Ptr<myvk::ImageView> last_rendered_image;
 	CaptureRenderSettings last_rendered_settings{};
 	bool paused = false;
 	std::string scene_error;
+	std::string resolution_error;
 	std::string capture_status;
 	bool include_capture_metadata = true;
 	bool print_capture_caption = false;
@@ -308,6 +342,7 @@ int main(int argc, char **argv) {
 
 		nrc_train_one_frame = false;
 		std::optional<size_t> requested_scene;
+		const ResolutionPreset *requested_resolution = nullptr;
 
 		myvk::ImGuiNewFrame();
 		ImGui::Begin("Panel");
@@ -328,6 +363,22 @@ int main(int argc, char **argv) {
 				                  "Switching scenes resets the camera and cache and resumes rendering.");
 			if (!scene_error.empty())
 				ImGui::TextWrapped("%s", scene_error.c_str());
+			if (!paused && ImGui::BeginCombo("Render resolution", resolution->label)) {
+				for (const auto &preset : kResolutions) {
+					if (!supports_resolution(preset.extent))
+						continue;
+					const bool selected = resolution == &preset;
+					if (ImGui::Selectable(preset.label, selected) && !selected)
+						requested_resolution = &preset;
+					if (selected)
+						ImGui::SetItemDefaultFocus();
+				}
+				ImGui::EndCombo();
+			}
+			if (paused)
+				ImGui::Text("Render resolution: %s", resolution->label);
+			if (!resolution_error.empty())
+				ImGui::TextWrapped("%s", resolution_error.c_str());
 			if (last_rendered_image && ImGui::Button(paused ? "Resume rendering" : "Pause rendering")) {
 				paused = !paused;
 				if (!paused)
@@ -488,7 +539,6 @@ int main(int argc, char **argv) {
 				scene_error = "Could not load " + entry.label + "; see the log for details.";
 			} else {
 				frame_manager->WaitIdle();
-				paused_graphs = {};
 				last_rendered_image.reset();
 				paused = false;
 				scene = std::move(next_scene);
@@ -510,6 +560,26 @@ int main(int argc, char **argv) {
 			}
 		}
 
+		if (requested_resolution) {
+			frame_manager->WaitIdle();
+			try {
+				vk_nrc_state->ResetAccumulateImage(requested_resolution->extent);
+			} catch (const std::runtime_error &error) {
+				resolution_error = error.what();
+				requested_resolution = nullptr;
+			}
+			if (requested_resolution) {
+				resolution = requested_resolution;
+				last_rendered_image.reset();
+				rebuild_render_graphs();
+				rebuild_present_graphs();
+				resolution_error.clear();
+				spdlog::info("Render resolution: {}", resolution->label);
+			}
+			prev_time = glfwGetTime();
+			delta = 0.0;
+		}
+
 		if (!compare && !paused && camera->DragControl(window, &cam_control, delta))
 			vk_nrc_state->ResetAccumulateCount();
 
@@ -520,47 +590,35 @@ int main(int argc, char **argv) {
 
 		if (frame_manager->NewFrame()) {
 			const auto &command_buffer = frame_manager->GetCurrentCommandBuffer();
-			const bool display_only = paused;
-			if (display_only && !paused_graphs[0]) {
-				// Finish all submitted samples before displaying the retained image.
-				frame_manager->WaitIdle();
-				for (auto &graph : paused_graphs)
-					graph = myvk::MakePtr<rg::PausedRenderGraph>(frame_manager, last_rendered_image);
-			} else if (!display_only && paused_graphs[0]) {
-				frame_manager->WaitIdle();
-				paused_graphs = {};
-			}
-
+			const auto frame = frame_manager->GetCurrentFrame();
 			command_buffer->Begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-			if (display_only) {
-				auto &graph = paused_graphs[frame_manager->GetCurrentFrame()];
-				graph->SetCanvasSize(frame_manager->GetExtent());
-				graph->CmdExecute(command_buffer);
-			} else {
-				auto &graph = render_graphs[frame_manager->GetCurrentFrame()];
-				graph->SetCanvasSize(frame_manager->GetExtent());
+			if (!paused) {
+				auto &graph = render_graphs[frame];
+				graph->SetCanvasSize(resolution->extent);
 				graph->CmdExecute(command_buffer);
 				last_rendered_image = vk_nrc_state->GetAccumulateImageView();
 			}
+			present_graphs[frame]->SetCanvasSize(frame_manager->GetExtent());
+			present_graphs[frame]->CmdExecute(command_buffer);
 			command_buffer->End();
 
-			// Record this sample before presentation: Render may resize the
-			// accumulation image and reset its count, which must remain zero.
-			if (!display_only) {
+			if (!paused) {
 				vk_nrc_state->NextFrame();
 				last_rendered_settings = {.nee = vk_nrc_state->IsUseNEE(),
 				                          .left_method = vk_nrc_state->GetLeftMethod(),
 				                          .right_method = vk_nrc_state->GetRightMethod(),
 				                          .max_bounces = vk_nrc_state->GetMaxBounces(),
 				                          .spp = vk_nrc_state->GetRenderedSPP(),
-				                          .scene_name = scene_catalog.entries[scene_index].name};
+				                          .scene_name = scene_catalog.entries[scene_index].name,
+				                          .fast_mode = vk_nrc_state->IsFastMode(),
+				                          .min_roughness = vk_nrc_state->GetMinRoughness()};
 			}
 			frame_manager->Render();
 			if (compare && ++phase_frames == (comparison_phase == 0 ? warmup_frames : sample_frames)) {
 				frame_manager->WaitIdle();
 				if (comparison_phase != 0) {
 					auto filename = comparison_directory / (comparison_phase == 1 ? "nrc.pfm" : "path-tracing.pfm");
-					if (!CaptureAccumulationPFM(generic_queue, vk_nrc_state->GetAccumulateImageView(), filename)) {
+					if (!CaptureAccumulationPFM(generic_queue, last_rendered_image, filename)) {
 						exit_code = EXIT_FAILURE;
 						break;
 					}
