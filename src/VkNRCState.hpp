@@ -39,6 +39,7 @@ private:
 	uint32_t m_accumulation_window{0}, m_history_write_index{0};
 	bool m_use_ema_weights{false};
 	bool m_use_nee{true};
+	bool m_indirect_only{false};
 	float m_train_probability{kDefaultTrainProbability};
 	uint32_t m_max_bounces{kDefaultMaxBounces};
 
@@ -69,6 +70,7 @@ public:
 	inline uint32_t GetMaxAccumulationWindow() const { return max_accumulation_window(m_accumulate_extent); }
 	inline bool IsUseEMAWeights() const { return m_use_ema_weights; }
 	inline bool IsUseNEE() const { return m_use_nee; }
+	inline bool IsIndirectOnly() const { return m_indirect_only; }
 	inline float GetTrainProbability() const { return m_train_probability; }
 	inline uint32_t GetMaxBounces() const { return m_max_bounces; }
 
@@ -93,6 +95,14 @@ public:
 		if (m_use_nee == use_nee)
 			return false;
 		m_use_nee = use_nee;
+		ResetAccumulateCount();
+		return true;
+	}
+	// This selects the displayed lighting contribution without changing cache targets.
+	inline bool SetIndirectOnly(bool indirect_only) {
+		if (m_indirect_only == indirect_only)
+			return false;
+		m_indirect_only = indirect_only;
 		ResetAccumulateCount();
 		return true;
 	}

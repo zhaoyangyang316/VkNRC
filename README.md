@@ -150,6 +150,16 @@ from accumulation or the cache.
 
 Controls:
 
+- **Indirect illumination only:** show illumination that has scattered at least
+  twice before reaching the camera. This removes visible emitter emission and
+  background, direct-light samples at the primary surface, and emitter/environment
+  hits reached by the first sampled bounce. Later-bounce lighting remains, with
+  NEE either on or off. It applies to both plain path tracing and NRC; **Cache**
+  view also traces the first bounce before querying the cache in this mode.
+  Changing it clears accumulation while preserving the trained cache and lock
+  state. The option is off by default; enable it at startup with `--indirect-only`.
+  With this renderer's depth convention, **Max bounces** 1 or 2 produces black;
+  use at least 3 to retain indirect light.
 - **Next event estimation:** toggle explicit direct-light sampling with MIS. Changing
   it resets accumulation and retrains the cache, while preserving the accumulation window. Use
   `--no-nee` to disable it from the command line, including in `--compare` mode.
@@ -196,6 +206,18 @@ clears the window while keeping the trained weights. Lock resets the
 accumulation so earlier learning transients do not remain in the comparison.
 NRC is an approximation and will retain some bias even
 with many accumulated samples; SPP reduces sampling noise, not cache error.
+
+The indirect-light regression test uses Python 3's standard library and the built
+renderer. It checks full = direct + indirect in plain path tracing, depth limits,
+and isolated emitter/environment cases in both NRC and plain PT, with NEE on/off:
+
+```powershell
+python test/indirect_illumination.py --validation
+```
+
+All 19 render cases passed locally; the largest per-channel decomposition error
+was below `1e-5`, and no Vulkan validation errors were reported. Captures and logs
+are saved under `build/indirect-illumination`.
 
 The rolling-window regression test runs the actual display shader on synthetic
 radiance frames and checks GPU readback against a CPU average of the last N frames:

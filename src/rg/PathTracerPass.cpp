@@ -21,9 +21,11 @@ struct PushConstant_Data {
 	float train_probability;
 	uint32_t max_bounces;
 	uint32_t use_nee;
+	uint32_t indirect_only;
 };
 static_assert(offsetof(PushConstant_Data, max_bounces) == 84);
 static_assert(offsetof(PushConstant_Data, use_nee) == 88);
+static_assert(offsetof(PushConstant_Data, indirect_only) == 92);
 static_assert(sizeof(PushConstant_Data) == 96);
 } // namespace path_tracer_pass
 using path_tracer_pass::PushConstant_Data;
@@ -111,6 +113,7 @@ void PathTracerPass::CmdExecute(const myvk::Ptr<myvk::CommandBuffer> &command_bu
 		    .train_probability = m_nrc_state_ptr->GetTrainProbability(),
 		    .max_bounces = m_nrc_state_ptr->GetMaxBounces(),
 		    .use_nee = m_nrc_state_ptr->IsUseNEE(),
+		    .indirect_only = m_nrc_state_ptr->IsIndirectOnly(),
 		};
 	}
 	command_buffer->CmdBindPipeline(GetVkPipeline());

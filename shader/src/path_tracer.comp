@@ -35,6 +35,7 @@ layout(push_constant) uniform uuPushConstant {
 	float uTrainProbability;
 	uint uMaxBounces;
 	uint uUseNEE;
+	uint uIndirectOnly;
 };
 
 // V-Buffer
@@ -348,7 +349,10 @@ PathTraceResult TracePath(Hit hit, Ray ray, in const uint method, in const bool 
 	for (uint vertex = 0; vertex < max_bounces; ++vertex) {
 		// Emission at this vertex contributes to preceding vertices, but not to
 		// the scattered-radiance target stored at this vertex itself.
-		if (render_active)
+		// Indirect-only keeps paths with at least two scattering vertices:
+		// E_0 is visible emission, and w_0 * E_1 is primary direct lighting.
+		// Training still learns full scattered radiance at every vertex.
+		if (render_active && (uIndirectOnly == 0 || vertex > 1))
 			radiance += render_weight * hit.emission * emission_mis;
 		if (train_active) {
 			for (uint i = 0; i < train_count; ++i)
@@ -362,7 +366,10 @@ PathTraceResult TracePath(Hit hit, Ray ray, in const uint method, in const bool 
 			break;
 
 		bool nrc_endpoint = spread_sum * spread_sum > threshold;
-		if (render_active && (method == METHOD_CACHE || (method == METHOD_NRC && nrc_endpoint))) {
+		// S_0 includes primary direct light; w_0 * S_1 contains only indirect
+		// illumination. Delay even the Cache view until after the first step.
+		if (render_active && (uIndirectOnly == 0 || vertex > 0) &&
+		    (method == METHOD_CACHE || (method == METHOD_NRC && nrc_endpoint))) {
 			PushScreenQuery(hit, ray);
 			result = PathTraceResult(radiance, render_weight);
 			render_active = false;
@@ -395,7 +402,8 @@ PathTraceResult TracePath(Hit hit, Ray ray, in const uint method, in const bool 
 		// Include the newly created record: direct illumination is part of S_i,
 		// whereas local emission (added before record creation) is not.
 		vec3 direct = SampleDirectLight(hit, ray);
-		if (render_active)
+		// Still sample at vertex zero to preserve training and random sequences.
+		if (render_active && (uIndirectOnly == 0 || vertex > 0))
 			radiance += render_weight * direct;
 		if (train_active) {
 			for (uint i = 0; i < train_count; ++i)
@@ -431,7 +439,7 @@ PathTraceResult TracePath(Hit hit, Ray ray, in const uint method, in const bool 
 			float environment_mis = uUseNEE != 0 && kEnvironmentIntensity > 0.0 && kLightCount == 0
 			                            ? PowerMIS(step.pdf, max(dot(hit.normal, ray.d), 0.0) / M_PI)
 			                            : 1.0;
-			if (render_active)
+			if (render_active && (uIndirectOnly == 0 || vertex > 0))
 				radiance += render_weight * kConstLight * environment_mis;
 			if (train_active) {
 				for (uint i = 0; i < train_count; ++i)
@@ -504,7 +512,7 @@ void main() {
 	uvec2 primitive_instance = texelFetch(uPrimitiveID_InstanceID, ivec2(coord), 0).rg;
 	PathTraceResult result;
 	if (primitive_instance.x == -1u)
-		result = PathTraceResult(kConstLight, vec3(0));
+		result = PathTraceResult(uIndirectOnly == 0 ? kConstLight : vec3(0), vec3(0));
 	else {
 		vec2 clip = (vec2(coord) + 0.5) / vec2(uExtent) * 2.0 - 1.0;
 		Ray ray = Ray(uOrigin, normalize(uLook + clip.x * uSide + clip.y * uUp));

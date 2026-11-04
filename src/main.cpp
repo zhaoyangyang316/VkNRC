@@ -35,11 +35,14 @@ static void ResetSceneCamera(Camera &camera, const SceneCatalogEntry &entry) {
 int main(int argc, char **argv) {
 	const auto print_usage = [] {
 		spdlog::info("Usage: VkNRC [scene.obj] [--camera x y z] [--fov degrees] [--max-bounces 1..64] "
-		             "[--accumulate-last samples] [--no-nee] [--compare output-directory] [--warmup frames] [--samples frames] [--seed number]");
+		             "[--accumulate-last samples] [--no-nee] [--indirect-only] [--compare output-directory] "
+		             "[--warmup frames] [--samples frames] [--seed number]");
 		spdlog::info("Without a scene argument, opens the bundled Cornell box. Choose other assets in the Scene list.");
 		spdlog::info("Accumulate last: 0 = all samples (default); 1..64 = rolling window, rendering continues. "
 		             "--max-spp is an alias. In --compare, --samples sets the frames rendered per capture.");
 		spdlog::info("Next event estimation is enabled by default; --no-nee disables it for comparison.");
+		spdlog::info("--indirect-only excludes visible emission/background and primary direct lighting for both NRC "
+		             "and path tracing; disabled by default.");
 	};
 	if (argc == 2 && std::string_view{argv[1]} == "--help") {
 		print_usage();
@@ -55,6 +58,7 @@ int main(int argc, char **argv) {
 	uint32_t max_bounces = VkNRCState::GetDefaultMaxBounces();
 	uint32_t accumulation_window = 0;
 	bool use_nee = true;
+	bool indirect_only = false;
 	const auto parse_uint = [](const char *text, uint32_t &value) {
 		std::string_view input{text};
 		auto [end, error] = std::from_chars(input.data(), input.data() + input.size(), value);
@@ -92,6 +96,8 @@ int main(int argc, char **argv) {
 			}
 		} else if (option == "--no-nee") {
 			use_nee = false;
+		} else if (option == "--indirect-only") {
+			indirect_only = true;
 		} else if (option == "--compare" && i < argc) {
 			comparison_directory = argv[i++];
 		} else if ((option == "--warmup" || option == "--samples" || option == "--seed") && i < argc) {
@@ -197,6 +203,7 @@ int main(int argc, char **argv) {
 	auto vk_nrc_state = myvk::MakePtr<VkNRCState>(generic_queue, VkExtent2D{kWidth, kHeight});
 	vk_nrc_state->SetMaxBounces(max_bounces);
 	vk_nrc_state->SetUseNEE(use_nee);
+	vk_nrc_state->SetIndirectOnly(indirect_only);
 	vk_nrc_state->SetAccumulationWindow(accumulation_window);
 	if (accumulation_window != 0) {
 		if (vk_nrc_state->GetAccumulationWindow() != accumulation_window) {
@@ -208,6 +215,7 @@ int main(int argc, char **argv) {
 	}
 	spdlog::info("Max bounces: {} (explicit surface vertices, including the primary hit)", max_bounces);
 	spdlog::info("Next event estimation: {}", use_nee ? "enabled" : "disabled");
+	spdlog::info("Indirect illumination only: {}", indirect_only ? "enabled" : "disabled");
 	const bool compare = !comparison_directory.empty();
 	if (compare) {
 		vk_nrc_state->SetRandomSeed(comparison_seed);
@@ -241,6 +249,7 @@ int main(int argc, char **argv) {
 
 	bool view_accumulate = vk_nrc_state->IsAccumulate();
 	bool view_use_nee = vk_nrc_state->IsUseNEE();
+	bool view_indirect_only = vk_nrc_state->IsIndirectOnly();
 	int view_left_method = static_cast<int>(vk_nrc_state->GetLeftMethod());
 	int view_right_method = static_cast<int>(vk_nrc_state->GetRightMethod());
 	bool nrc_use_ema = vk_nrc_state->IsUseEMAWeights(), nrc_lock = false, nrc_train_one_frame = false;
@@ -299,6 +308,18 @@ int main(int argc, char **argv) {
 				if (ImGui::IsItemHovered())
 					ImGui::SetTooltip("Sample lights explicitly and combine with BSDF samples using MIS.\n"
 					                  "Changing this restarts accumulation and cache training.");
+				if (ImGui::Checkbox("Indirect illumination only", &view_indirect_only)) {
+					frame_manager->WaitIdle();
+					if (vk_nrc_state->SetIndirectOnly(view_indirect_only)) {
+						last_rendered_image.reset();
+						last_rendered_spp = 0;
+						spdlog::info("Indirect illumination only: {}", view_indirect_only ? "enabled" : "disabled");
+					}
+				}
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Remove visible emission/background and direct light at the primary surface.\n"
+					                  "Keep illumination from subsequent bounces in NRC and path tracing.\n"
+					                  "Changing this restarts accumulation and keeps the trained cache.");
 				if (ImGui::SliderInt("Max bounces", &view_max_bounces, 1,
 				                     static_cast<int>(VkNRCState::GetMaxSupportedBounces()))) {
 					view_max_bounces = std::clamp(view_max_bounces, 1,
