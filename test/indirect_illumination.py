@@ -2,6 +2,7 @@
 """Sequential GPU regression for --indirect-only; Python 3 standard library only.
 
 Run after building Release: python test/indirect_illumination.py --validation
+For the fast-mode primary/secondary regression add --fast-gi (one warmup frame).
 Each renderer launch is bounded; captures and combined stdout/stderr remain in --out.
 """
 import argparse
@@ -55,20 +56,44 @@ def fixtures(directory):
     return result
 
 
+def secondary_fixtures(directory):
+    # The camera looks along -Z from between two facing quads. At a depth of 3,
+    # only the back quad can supply cached indirect light: the primary must be
+    # traced and the third hit has already reached the depth limit.
+    meshes = {}
+    for name, roughness in (("smooth", .25), ("equal", .5), ("rough", .75)):
+        path = directory / f"secondary-{name}.obj"
+        path.write_text(f"mtllib {path.stem}.mtl\n"
+                        "v -1 -1 -.25\nv 1 -1 -.25\nv 1 1 -.25\nv -1 1 -.25\n"
+                        "v -1 -1 .25\nv 1 -1 .25\nv 1 1 .25\nv -1 1 .25\nvt 0 0\n"
+                        "usemtl primary\nf 1/1 2/1 3/1\nf 1/1 3/1 4/1\n"
+                        "usemtl secondary\nf 5/1 8/1 7/1\nf 5/1 7/1 6/1\n", encoding="ascii")
+        path.with_suffix(".mtl").write_text("".join(
+            f"newmtl {material}\nKd .7 .7 .7\nKs 0 0 0\nKe 0 0 0\nNi 1.5\nPr {r}\n"
+            for material, r in (("primary", 1), ("secondary", roughness))), encoding="ascii")
+        meshes[path.stem] = path
+    return meshes
+
+
 def main():
     root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--exe", type=Path, default=root / "build/Release/VkNRC.exe")
-    parser.add_argument("--out", type=Path, default=root / "build/indirect-illumination")
-    parser.add_argument("--samples", type=int, choices=(64, 128), default=64)
+    parser.add_argument("--out", type=Path)
+    parser.add_argument("--samples", type=int, choices=(4, 64, 128))
+    parser.add_argument("--fast-gi", action="store_true", help="Check explicit primary transport and secondary roughness gating")
     parser.add_argument("--timeout", type=float, default=180, help="Seconds allowed per renderer launch")
     parser.add_argument("--validation", action="store_true", help="Enable VK_LAYER_KHRONOS_validation")
     args = parser.parse_args()
+    args.out = args.out or root / "build" / ("fast-gi" if args.fast_gi else "indirect-illumination")
+    args.samples = args.samples or (4 if args.fast_gi else 64)
     args.exe, args.out = args.exe.resolve(), args.out.resolve()
     require(args.exe.is_file(), f"Renderer missing: {args.exe}")
     require(args.timeout > 0 and math.isfinite(args.timeout), "--timeout must be positive and finite")
     args.out.mkdir(parents=True, exist_ok=True)
     scenes = fixtures(args.out / "fixtures")
+    if args.fast_gi:
+        scenes.update(secondary_fixtures(args.out / "fixtures"))
     scenes["cornell"] = root / "assets/cornell-box/cornell-box.obj"
     require(scenes["cornell"].is_file(), "Cornell fixture is missing")
     environment = os.environ.copy()
@@ -77,16 +102,22 @@ def main():
     results = {}
     dimensions = None
 
-    def capture(scene, depth, indirect, nee):
+    def capture(scene, depth, indirect, nee, threshold=.5):
         nonlocal dimensions
         label = f"{scene}-d{depth}-{'indirect' if indirect else 'full'}-{'nee' if nee else 'bsdf'}"
+        if args.fast_gi:
+            label += f"-fast-{threshold:g}"
         output = args.out / label
         output.mkdir(exist_ok=True)
         for filename in ("nrc.pfm", "path-tracing.pfm"):
             (output / filename).unlink(missing_ok=True)
-        command = [str(args.exe), str(scenes[scene]), "--compare", str(output), "--warmup", "64",
+        command = [str(args.exe), str(scenes[scene]), "--compare", str(output), "--warmup", "1" if args.fast_gi else "64",
                    "--samples", str(args.samples), "--seed", "1337", "--max-bounces", str(depth)]
-        if scene != "cornell":
+        if args.fast_gi:
+            command += ["--fast-mode", "--min-roughness", str(threshold)]
+        if scene.startswith("secondary-"):
+            command += ["--camera", "0", "0", "0", "--fov", "60"]
+        elif scene != "cornell":
             # Include both the quad and background to exercise primary misses.
             command += ["--camera", "0", "0", "3", "--fov", "60"]
         if indirect:
@@ -106,6 +137,8 @@ def main():
         log = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", log_path.read_text(encoding="utf-8", errors="replace"))
         require(not re.search(r"VUID-|Validation Error|VK_ERROR_|\[(?:error|critical)\]", log, re.I),
                 f"{label}: renderer/validation error; see {log_path}")
+        if args.fast_gi:
+            require(f"NRC fast mode: enabled, min roughness: {threshold:g}" in log, f"{label}: unexpected mode")
         images, stats = {}, {}
         for method, filename in (("nrc", "nrc.pfm"), ("pt", "path-tracing.pfm")):
             require(filename in log and "Captured" in log, f"{label}: capture not confirmed in log")
@@ -126,6 +159,46 @@ def main():
     def positive(images, label):
         for method, values in images.items():
             require(sum(values) / len(values) > 1e-5, f"{label}/{method}: expected positive radiance")
+
+    if args.fast_gi:
+        def explicit(images, label):
+            require(images["nrc"] == images["pt"], f"{label}: NRC diverged from explicit PT")
+
+        def cached(images, label):
+            # Cold weights make a lookup observable; require differences across a substantial region.
+            changed = sum(abs(a - b) > .001 for a, b in zip(images["nrc"], images["pt"]))
+            require(changed > .005 * len(images["pt"]), f"{label}: only {changed} RGB elements differ from PT")
+
+        for nee in (True, False):
+            plane = capture("environment", 3, False, nee)
+            explicit(plane, "eligible primary plane")
+            w, h = dimensions
+            center = 3 * ((h // 2) * w + w // 2)
+            require(abs(plane["pt"][center] - 7) < .003, "Expected direct radiance 10 * .7 on the plane")
+            black(capture("environment", 3, True, nee), "plane has no indirect illumination")
+            direct = capture("cornell", 2, False, nee)
+            explicit(direct, "Cornell direct lighting")
+            if nee:
+                full = capture("cornell", 64, False, nee)
+                gi = capture("cornell", 64, True, nee)
+                cached(full, "full Cornell")
+                cached(gi, "indirect Cornell")
+                error = max(abs(f - i - d) for f, i, d in zip(full["pt"], gi["pt"], direct["pt"]))
+                require(error <= 5e-5, f"Cornell PT full - indirect - direct max error {error}")
+                for indirect in (False, True):
+                    explicit(capture("cornell", 64, indirect, nee, 1), "Cornell upper roughness cutoff")
+
+        for scene in ("secondary-smooth", "secondary-equal", "secondary-rough"):
+            for indirect in (False, True):
+                image = capture(scene, 3, indirect, True)
+                require(sum(image["pt"]) / len(image["pt"]) > .01, f"{scene}: insufficient illumination")
+                if scene == "secondary-rough":
+                    cached(image, scene)
+                else:
+                    explicit(image, scene)
+        print(f"PASS: {len(results)} fast GI captures; primary light, strict secondary cutoff and depth constraints passed.")
+        print(f"Logs, fixtures, PFM images, and statistics: {args.out}")
+        return
 
     # Frozen PT uses identical random sequences across modes. NRC warmup/cache
     # paths can differ, so exact decomposition is intentionally tested only on PT.

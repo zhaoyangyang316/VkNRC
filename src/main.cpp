@@ -57,12 +57,15 @@ static void ResetSceneCamera(Camera &camera, const SceneCatalogEntry &entry) {
 int main(int argc, char **argv) {
 	const auto print_usage = [] {
 		spdlog::info("Usage: VkNRC [scene.obj] [--camera x y z] [--fov degrees] [--max-bounces 1..64] "
-		             "[--accumulate-last samples] [--no-nee] [--indirect-only] [--compare output-directory] "
+		             "[--accumulate-last samples] [--no-nee] [--indirect-only] [--fast-mode] "
+		             "[--min-roughness 0..1] [--compare output-directory] "
 		             "[--warmup frames] [--samples frames] [--seed number]");
 		spdlog::info("Without a scene argument, opens the bundled Cornell box. Choose other assets in the Scene list.");
 		spdlog::info("Accumulate last: 0 = all samples (default); 1..64 = rolling window, rendering continues. "
 		             "--max-spp is an alias. In --compare, --samples sets the frames rendered per capture.");
 		spdlog::info("Next event estimation is enabled by default; --no-nee disables it for comparison.");
+		spdlog::info("--fast-mode lets NRC query indirect lighting at secondary hits with roughness strictly above --min-roughness "
+		             "(default {:.1f}). Fast mode is off by default.", VkNRCState::GetDefaultMinRoughness());
 		spdlog::info("--indirect-only excludes visible emission/background and primary direct lighting for both NRC "
 		             "and path tracing; disabled by default.");
 	};
@@ -81,6 +84,8 @@ int main(int argc, char **argv) {
 	uint32_t accumulation_window = 0;
 	bool use_nee = true;
 	bool indirect_only = false;
+	bool fast_mode = false;
+	float min_roughness = VkNRCState::GetDefaultMinRoughness();
 	const auto parse_uint = [](const char *text, uint32_t &value) {
 		std::string_view input{text};
 		auto [end, error] = std::from_chars(input.data(), input.data() + input.size(), value);
@@ -120,6 +125,13 @@ int main(int argc, char **argv) {
 			use_nee = false;
 		} else if (option == "--indirect-only") {
 			indirect_only = true;
+		} else if (option == "--fast-mode") {
+			fast_mode = true;
+		} else if (option == "--min-roughness") {
+			if (i == argc || !parse_float(argv[i++], min_roughness) || min_roughness < 0.0f || min_roughness > 1.0f) {
+				spdlog::error("Min roughness must be a finite number from 0 to 1");
+				return EXIT_FAILURE;
+			}
 		} else if (option == "--compare" && i < argc) {
 			comparison_directory = argv[i++];
 		} else if ((option == "--warmup" || option == "--samples" || option == "--seed") && i < argc) {
@@ -226,6 +238,7 @@ int main(int argc, char **argv) {
 	vk_nrc_state->SetMaxBounces(max_bounces);
 	vk_nrc_state->SetUseNEE(use_nee);
 	vk_nrc_state->SetIndirectOnly(indirect_only);
+	vk_nrc_state->SetFastMode(fast_mode, min_roughness);
 	vk_nrc_state->SetAccumulationWindow(accumulation_window);
 	if (accumulation_window != 0) {
 		if (vk_nrc_state->GetAccumulationWindow() != accumulation_window) {
@@ -238,6 +251,7 @@ int main(int argc, char **argv) {
 	spdlog::info("Max bounces: {} (explicit surface vertices, including the primary hit)", max_bounces);
 	spdlog::info("Next event estimation: {}", use_nee ? "enabled" : "disabled");
 	spdlog::info("Indirect illumination only: {}", indirect_only ? "enabled" : "disabled");
+	spdlog::info("NRC fast mode: {}, min roughness: {}", fast_mode ? "enabled" : "disabled", min_roughness);
 	const bool compare = !comparison_directory.empty();
 	if (compare) {
 		vk_nrc_state->SetRandomSeed(comparison_seed);
@@ -353,6 +367,23 @@ int main(int argc, char **argv) {
 				if (ImGui::IsItemHovered())
 					ImGui::SetTooltip("Sample lights explicitly and combine with BSDF samples using MIS.\n"
 					                  "Changing this restarts accumulation and cache training.");
+				const bool mode_changed = ImGui::Checkbox("Fast mode (NRC)", &fast_mode);
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Use a roughness threshold for NRC cache queries. Plain path tracing is unchanged.\n"
+					                  "Changing the active rule restarts accumulation and cache training.");
+				const bool roughness_changed = ImGui::SliderFloat("Min roughness", &min_roughness, 0.0f, 1.0f,
+				                                                  "%.3f", ImGuiSliderFlags_AlwaysClamp);
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("NRC traces primary direct lighting and caches GI at secondary hits\n"
+					                  "where roughness > Min roughness, including in indirect-only mode.");
+				if (mode_changed || roughness_changed) {
+					if (vk_nrc_state->SetFastMode(fast_mode, min_roughness)) {
+						frame_manager->WaitIdle();
+						vk_nrc_state->ResetMLPBuffers();
+						nrc_lock = false;
+					}
+					last_rendered_image.reset();
+				}
 				if (ImGui::Checkbox("Indirect illumination only", &view_indirect_only)) {
 					frame_manager->WaitIdle();
 					if (vk_nrc_state->SetIndirectOnly(view_indirect_only)) {

@@ -1,0 +1,13 @@
+# Denoising implementation resources
+
+Hasselgren et al.’s *Neural Temporal Adaptive Sampling and Denoising* (2020) is the denoiser cited in the NRC paper’s 1-SPP Living Room experiment. The authors describe a PyTorch implementation integrated with Falcor. Their project page provides the paper and supplement. I could not verify a public release of their source code or pretrained weights. [NVIDIA project page](https://research.nvidia.com/publication/2020-05_neural-temporal-adaptive-sampling-and-denoising) · [NRC experiment and algorithm notes](NRC-notes.md)
+
+## Scardigli et al. — public PyTorch baseline
+
+The NeurIPS 2023 project *RL-based Stateful Neural Adaptive Sampling and Denoising for Real-Time Path Tracing* includes a comparison mode named `ntas`. Its code implements per-pixel sample allocation, reprojection of the previous denoised frame, and a temporal training loss. [Repository](https://github.com/AJSVB/RL_PATH_TRACING) · [Sampling and temporal feedback code](https://github.com/AJSVB/RL_PATH_TRACING/blob/main/time/physicalsimulation.py) · [Paper, baseline comparison](https://proceedings.neurips.cc/paper_files/paper/2023/file/d1422213c9f2bdd5178b77d166fba86a-Paper-Conference.pdf#page=5)
+
+The main difference for VkNRC is the reconstruction step. Scardigli’s U-Net directly predicts RGB. Hasselgren’s network predicts 5×5 filter kernels at three spatial scales and a separate kernel for the reprojected history. The public training entry point also references an undefined `model` variable in the baseline branch. I inspected the source and could not verify a working training run or a downloadable NTAS checkpoint. [Denoiser forward pass](https://github.com/AJSVB/RL_PATH_TRACING/blob/main/time/training/ntas.py#L97-L102) · [Training entry point](https://github.com/AJSVB/RL_PATH_TRACING/blob/main/time/main.py#L91-L97) · [Original architecture, Figure 3](https://research.nvidia.com/sites/default/files/pubs/2020-05_Neural-Temporal-Adaptive/NTASAD_preprint.pdf#page=3)
+
+## Bálint et al. — reported reproduction at 4 SPP
+
+In *Forget Superresolution, Sample Adaptively (when Path Tracing)*, the authors report independently implementing Hasselgren’s sampler and denoiser and reproducing its performance at 4 SPP. They also report unstable training at 2 SPP and failure to complete one epoch at 1 SPP. Their public repository contains their newer FSSA models. I could not verify a public implementation or checkpoint for the Hasselgren baseline used in their comparison. [Paper, §7 baseline comparison](https://arxiv.org/html/2602.08642v1#S7) · [Public model directory](https://github.com/balintio/fssa/tree/main/src/model)

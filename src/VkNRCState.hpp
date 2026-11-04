@@ -7,6 +7,7 @@
 #define VKNRC_VKNRCSTATE_HPP
 
 #include <algorithm>
+#include <cmath>
 #include <glm/glm.hpp>
 #include <half.hpp>
 #include <myvk/Buffer.hpp>
@@ -21,6 +22,7 @@ public:
 
 private:
 	inline static constexpr float kDefaultTrainProbability = 0.03f;
+	inline static constexpr float kDefaultMinRoughness = 0.5f;
 	inline static constexpr uint32_t kDefaultMaxBounces = 64, kMaxSupportedBounces = 64;
 	inline static constexpr uint32_t kNNHiddenLayers = 5, kNNWidth = 64, kNNOutWidth = 3, kTrainBatchSize = 16384,
 	                                 kTrainBatchCount = 4;
@@ -40,6 +42,8 @@ private:
 	bool m_use_ema_weights{false};
 	bool m_use_nee{true};
 	bool m_indirect_only{false};
+	bool m_fast_mode{false};
+	float m_min_roughness{kDefaultMinRoughness};
 	float m_train_probability{kDefaultTrainProbability};
 	uint32_t m_max_bounces{kDefaultMaxBounces};
 
@@ -73,6 +77,8 @@ public:
 	inline bool IsUseEMAWeights() const { return m_use_ema_weights; }
 	inline bool IsUseNEE() const { return m_use_nee; }
 	inline bool IsIndirectOnly() const { return m_indirect_only; }
+	inline bool IsFastMode() const { return m_fast_mode; }
+	inline float GetMinRoughness() const { return m_min_roughness; }
 	inline float GetTrainProbability() const { return m_train_probability; }
 	inline uint32_t GetMaxBounces() const { return m_max_bounces; }
 
@@ -91,6 +97,18 @@ public:
 	// last N samples. The caller waits for in-flight rendering before reallocating.
 	bool SetAccumulationWindow(uint32_t window);
 	inline void SetUseEMAWeights(bool use_ema_weights) { m_use_ema_weights = use_ema_weights; }
+	// Return true when the active cache termination rule changes and the caller must restart training.
+	inline bool SetFastMode(bool enabled, float min_roughness) {
+		if (!std::isfinite(min_roughness))
+			return false;
+		min_roughness = std::clamp(min_roughness, 0.0f, 1.0f);
+		const bool rule_changed = enabled != m_fast_mode || (enabled && min_roughness != m_min_roughness);
+		m_fast_mode = enabled;
+		m_min_roughness = min_roughness;
+		if (rule_changed)
+			ResetAccumulateCount();
+		return rule_changed;
+	}
 	// Switching the sampling estimator changes the training targets; the caller
 	// resets the MLP after this reports a change.
 	inline bool SetUseNEE(bool use_nee) {
@@ -146,6 +164,7 @@ public:
 	static constexpr uint32_t GetTrainBatchSize() { return kTrainBatchSize; }
 	static constexpr uint32_t GetWeightCount() { return kNNWeighCount; }
 	static constexpr float GetDefaultTrainProbability() { return kDefaultTrainProbability; }
+	static constexpr float GetDefaultMinRoughness() { return kDefaultMinRoughness; }
 	static constexpr uint32_t GetDefaultMaxBounces() { return kDefaultMaxBounces; }
 	static constexpr uint32_t GetMaxSupportedBounces() { return kMaxSupportedBounces; }
 };

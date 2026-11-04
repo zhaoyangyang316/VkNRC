@@ -150,6 +150,19 @@ from accumulation or the cache.
 
 Controls:
 
+- **Fast mode** replaces the NRC path-footprint test with a material roughness
+  threshold. NRC traces the first bounce explicitly, so direct lighting at the
+  camera-visible surface comes from the path tracer. The first secondary hit
+  with `roughness > Min roughness` can query the cache for indirect lighting.
+  Smoother hits and hits exactly at the threshold continue tracing. **Indirect
+  illumination only** uses this same rule and omits the primary direct terms.
+  The explicit depth limit still applies. **Cache** is a separate debug view
+  that can visualize the network prediction at the primary hit.
+  Fast mode is off by default. Try
+  `.\run-demo.cmd assets/veach-door/veach-door.obj --fast-mode --min-roughness 0.5`.
+  **Min roughness** ranges from 0 to 1 and defaults to 0.5. All Cornell Box
+  materials have roughness 1, so they qualify at the default threshold. A change to the active rule
+  restarts accumulation and cache training.
 - **Capture frame (EXR)** saves the latest rendered image, including the current
   split view and accumulation, as a linear 32-bit RGB OpenEXR. It works while
   rendering or paused and preserves the rendered resolution. Captures are taken
@@ -227,6 +240,10 @@ and isolated emitter/environment cases in both NRC and plain PT, with NEE on/off
 ```powershell
 python test/indirect_illumination.py --validation
 ```
+
+Add `--fast-gi` to check fast NRC in both full and indirect-only views. These
+cases exercise direct-only lighting and secondary surfaces with roughness
+below, equal to, and above the threshold. Output is saved in `build/fast-gi`.
 
 All 19 render cases passed locally; the largest per-channel decomposition error
 was below `1e-5`, and no Vulkan validation errors were reported. Captures and logs

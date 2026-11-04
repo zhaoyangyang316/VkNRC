@@ -22,11 +22,15 @@ struct PushConstant_Data {
 	uint32_t max_bounces;
 	uint32_t use_nee;
 	uint32_t indirect_only;
+	uint32_t fast_mode;
+	float min_roughness;
 };
 static_assert(offsetof(PushConstant_Data, max_bounces) == 84);
 static_assert(offsetof(PushConstant_Data, use_nee) == 88);
 static_assert(offsetof(PushConstant_Data, indirect_only) == 92);
-static_assert(sizeof(PushConstant_Data) == 96);
+static_assert(offsetof(PushConstant_Data, fast_mode) == 96);
+static_assert(offsetof(PushConstant_Data, min_roughness) == 100);
+static_assert(sizeof(PushConstant_Data) == 112);
 } // namespace path_tracer_pass
 using path_tracer_pass::PushConstant_Data;
 
@@ -114,6 +118,8 @@ void PathTracerPass::CmdExecute(const myvk::Ptr<myvk::CommandBuffer> &command_bu
 		    .max_bounces = m_nrc_state_ptr->GetMaxBounces(),
 		    .use_nee = m_nrc_state_ptr->IsUseNEE(),
 		    .indirect_only = m_nrc_state_ptr->IsIndirectOnly(),
+		    .fast_mode = m_nrc_state_ptr->IsFastMode(),
+		    .min_roughness = m_nrc_state_ptr->GetMinRoughness(),
 		};
 	}
 	command_buffer->CmdBindPipeline(GetVkPipeline());

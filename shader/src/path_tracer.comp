@@ -36,6 +36,8 @@ layout(push_constant) uniform uuPushConstant {
 	uint uMaxBounces;
 	uint uUseNEE;
 	uint uIndirectOnly;
+	uint uFastMode;
+	float uMinRoughness;
 };
 
 // V-Buffer
@@ -98,7 +100,9 @@ Hit GetVBufferHit(in const uint primitive_id, in const uint instance_id, in cons
 	hit.primitive_id = primitive_id;
 	hit.instance_id = instance_id;
 	hit.barycentric = barycentric.yz;
-	hit.position = mat3(vertex_0, vertex_1, vertex_2) * barycentric;
+	// Add local edge offsets to the base vertex last. This preserves constant
+	// coordinates on planar faces and avoids spurious secondary hits at grazing angles.
+	hit.position = vertex_0 + (u * v01 + v * v02);
 	hit.texcoord = mat3x2(texcoord_0, texcoord_1, texcoord_2) * barycentric;
 	hit.material = GetSceneMaterial(primitive_id);
 	hit.diffuse = GetSceneDiffuse(hit.material, hit.texcoord);
@@ -131,7 +135,7 @@ Hit GetRayQueryHit(in const rayQueryEXT ray_query, in const Ray ray) {
 	hit.primitive_id = primitive_id;
 	hit.instance_id = instance_id;
 	hit.barycentric = barycentric.yz;
-	hit.position = mat3(vertex_0, vertex_1, vertex_2) * barycentric;
+	hit.position = vertex_0 + (barycentric.y * (vertex_1 - vertex_0) + barycentric.z * (vertex_2 - vertex_0));
 	hit.texcoord = mat3x2(texcoord_0, texcoord_1, texcoord_2) * barycentric;
 	hit.material = GetSceneMaterial(primitive_id);
 	hit.diffuse = GetSceneDiffuse(hit.material, hit.texcoord);
@@ -338,9 +342,13 @@ PathTraceResult TracePath(Hit hit, Ray ray, in const uint method, in const bool 
 
 	vec3 radiance = vec3(0), render_weight = vec3(1), path_weight = vec3(1);
 	PathTraceResult result = PathTraceResult(vec3(0), vec3(0));
-	float primary_cosine = abs(dot(hit.normal, -ray.d));
-	float primary_spread = _distance_2(ray.o, hit.position) / (4.0 * M_PI * max(primary_cosine, 1e-12));
-	float threshold = C * primary_spread;
+	bool fast_mode = uFastMode != 0;
+	float threshold = 0.0;
+	if (!fast_mode) {
+		float primary_cosine = abs(dot(hit.normal, -ray.d));
+		float primary_spread = _distance_2(ray.o, hit.position) / (4.0 * M_PI * max(primary_cosine, 1e-12));
+		threshold = C * primary_spread;
+	}
 	float spread_sum = 0.0, suffix_spread_sum = 0.0;
 	bool suffix_started = false;
 	uint max_bounces = clamp(uMaxBounces, 1u, uint(MAX_BOUNCE));
@@ -365,19 +373,25 @@ PathTraceResult TracePath(Hit hit, Ray ray, in const uint method, in const bool 
 		if (vertex + 1 == max_bounces)
 			break;
 
-		bool nrc_endpoint = spread_sum * spread_sum > threshold;
-		// S_0 includes primary direct light; w_0 * S_1 contains only indirect
-		// illumination. Delay even the Cache view until after the first step.
-		if (render_active && (uIndirectOnly == 0 || vertex > 0) &&
-		    (method == METHOD_CACHE || (method == METHOD_NRC && nrc_endpoint))) {
+		// Compare the material's roughness, before BRDF numerical regularization.
+		bool rough_hit = hit.material.roughness > uMinRoughness;
+		// S_0 contains primary direct lighting. Trace the first scatter explicitly
+		// (including its MIS-weighted light hit or escape) in both NRC views.
+		// At a secondary hit, emission was handled above and S_i contributes only GI.
+		bool nrc_endpoint = vertex > 0 && (fast_mode ? rough_hit : spread_sum * spread_sum > threshold);
+		bool debug_query = method == METHOD_CACHE && (uIndirectOnly == 0 || vertex > 0);
+		if (render_active && (debug_query || (method == METHOD_NRC && nrc_endpoint))) {
 			PushScreenQuery(hit, ray);
 			result = PathTraceResult(radiance, render_weight);
 			render_active = false;
 		}
 
+		// The first eligible hit starts the suffix and receives a training target.
+		// Only a later hit may supply the cached value for that target.
+		bool suffix_endpoint =
+		    suffix_started && (fast_mode ? rough_hit : suffix_spread_sum * suffix_spread_sum > threshold);
 		if (train_active && !unbiased_training &&
-		    ((suffix_started && suffix_spread_sum * suffix_spread_sum > threshold) ||
-		     train_count == MAX_TRAIN_RECORDS)) {
+		    (suffix_endpoint || (!fast_mode && train_count == MAX_TRAIN_RECORDS))) {
 			bootstrap_input = MakeNRCInput(hit, -ray.d);
 			bootstrap = true;
 			train_active = false;
@@ -390,7 +404,9 @@ PathTraceResult TracePath(Hit hit, Ray ray, in const uint method, in const bool 
 		}
 		if (!render_active && !train_active)
 			break;
-		if (train_active && train_count < MAX_TRAIN_RECORDS) {
+		// Reserve a target for the first eligible rough hit even after a long smooth prefix.
+		uint record_limit = fast_mode && !suffix_started ? MAX_TRAIN_RECORDS - 1u : MAX_TRAIN_RECORDS;
+		if (train_active && train_count < record_limit) {
 			train_input[train_count] = MakeNRCInput(hit, -ray.d);
 			train_bias[train_count] = vec3(0);
 			train_factor[train_count] = vec3(1);
@@ -455,11 +471,13 @@ PathTraceResult TracePath(Hit hit, Ray ray, in const uint method, in const bool 
 		                   : 1.0;
 		// Eq. 3 uses the predecessor's sampled-direction PDF and the arriving
 		// ray's cosine at this vertex, not a new sample at the current vertex.
-		float arrival_cosine = abs(dot(hit.normal, -ray.d));
-		float spread_step = sqrt(_distance_2(ray.o, hit.position) / max(step.pdf * arrival_cosine, 1e-12));
-		spread_sum += spread_step;
-		if (suffix_started)
-			suffix_spread_sum += spread_step;
+		if (!fast_mode) {
+			float arrival_cosine = abs(dot(hit.normal, -ray.d));
+			float spread_step = sqrt(_distance_2(ray.o, hit.position) / max(step.pdf * arrival_cosine, 1e-12));
+			spread_sum += spread_step;
+			if (suffix_started)
+				suffix_spread_sum += spread_step;
+		}
 	}
 
 	if (render_active)
