@@ -38,6 +38,7 @@ private:
 	inline static constexpr uint32_t kNNWeighCount = kNNWidth * kNNWidth * kNNHiddenLayers + kNNWidth * kNNOutWidth;
 
 	myvk::Ptr<myvk::Queue> m_queue_ptr;
+	VkDeviceSize m_history_budget;
 	// use_weights: weights used by actual renderer
 	myvk::Ptr<myvk::Buffer> m_weights, m_use_weights, m_optimizer_state, m_optimizer_entries;
 	myvk::Ptr<myvk::ImageView> m_accumulate_view, m_history_view;
@@ -61,7 +62,8 @@ private:
 	myvk::Ptr<myvk::ImageView> create_history_view(VkExtent2D extent, uint32_t window) const;
 
 public:
-	inline VkNRCState(const myvk::Ptr<myvk::Queue> &queue_ptr, VkExtent2D extent) : m_queue_ptr(queue_ptr) {
+	inline VkNRCState(const myvk::Ptr<myvk::Queue> &queue_ptr, VkExtent2D extent,
+	                  VkDeviceSize history_budget = VkDeviceSize{1} << 30) : m_queue_ptr(queue_ptr), m_history_budget(history_budget) {
 		ResetAccumulateImage(extent);
 		ResetMLPBuffers();
 	}

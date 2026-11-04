@@ -26,20 +26,21 @@ private:
 	NRCResources create_nrc_resources();
 
 public:
-	explicit NRCRenderGraph(const myvk::Ptr<myvk::FrameManager> &frame_manager,
-	                        const myvk::Ptr<VkSceneTLAS> &scene_tlas_ptr, const myvk::Ptr<VkNRCState> &nrc_state_ptr,
-	                        const myvk::Ptr<Camera> &camera_ptr);
+	explicit NRCRenderGraph(const myvk::Ptr<VkScene> &scene, const myvk::Ptr<VkNRCState> &nrc_state_ptr,
+	                        const myvk::Ptr<Camera> &camera_ptr, const myvk::Ptr<VkSceneTLAS> &scene_tlas_ptr);
 	~NRCRenderGraph() final = default;
 	void PreExecute() const final;
 };
 
 // Fit the linear render to the window, tone map it, then draw the live UI.
+#ifdef MYVK_ENABLE_GLFW
 class PresentRenderGraph final : public myvk_rg::RenderGraphBase {
 public:
 	PresentRenderGraph(const myvk::Ptr<myvk::FrameManager> &frame_manager,
 	                   const myvk::Ptr<myvk::ImageView> &linear_image);
 	~PresentRenderGraph() final = default;
 };
+#endif
 
 } // namespace rg
 

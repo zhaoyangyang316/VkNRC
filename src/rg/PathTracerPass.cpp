@@ -38,8 +38,9 @@ PathTracerPass::PathTracerPass(myvk_rg::Parent parent, const PathTracerPass::Arg
     : myvk_rg::ComputePassBase(parent), m_camera_ptr(args.camera_ptr), m_scene_ptr(args.scene_ptr),
       m_nrc_state_ptr(args.nrc_state_ptr) {
 	// Scene
-	AddDescriptorInput<myvk_rg::Usage::kAccelerationStructureR, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT>(
-	    {0}, {"tlas"}, args.scene_resources.tlas);
+	if (args.scene_resources.tlas)
+		AddDescriptorInput<myvk_rg::Usage::kAccelerationStructureR, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT>(
+		    {0}, {"tlas"}, *args.scene_resources.tlas);
 	AddDescriptorInput<myvk_rg::Usage::kStorageBufferR, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT>(
 	    {1}, {"vertices"}, args.scene_resources.vertices);
 	AddDescriptorInput<myvk_rg::Usage::kStorageBufferR, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT>(
@@ -60,10 +61,11 @@ PathTracerPass::PathTracerPass(myvk_rg::Parent parent, const PathTracerPass::Arg
 		++texture_id;
 	}
 	// V-Buffer
-	AddDescriptorInput<myvk_rg::Usage::kSampledImage, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT>(
-	    {9}, {"v_buffer"}, args.vbuffer_image,
-	    myvk::Sampler::Create(GetRenderGraphPtr()->GetDevicePtr(), VK_FILTER_NEAREST,
-	                          VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_SAMPLER_MIPMAP_MODE_NEAREST, 0.0f));
+	if (args.vbuffer_image)
+		AddDescriptorInput<myvk_rg::Usage::kSampledImage, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT>(
+		    {9}, {"v_buffer"}, *args.vbuffer_image,
+		    myvk::Sampler::Create(GetRenderGraphPtr()->GetDevicePtr(), VK_FILTER_NEAREST,
+		                          VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_SAMPLER_MIPMAP_MODE_NEAREST, 0.0f));
 	// NRC
 	AddDescriptorInput<myvk_rg::Usage::kStorageBufferRW, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT>({12}, {"eval_count"},
 	                                                                                             args.eval_count);
@@ -91,7 +93,11 @@ myvk::Ptr<myvk::ComputePipeline> PathTracerPass::CreatePipeline() const {
 	auto pipeline_layout = myvk::PipelineLayout::Create(device, {GetVkDescriptorSetLayout()},
 	                                                    {{VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstant_Data)}});
 	static constexpr uint32_t kCompSpv[] = {
+#if defined(__ANDROID__) && defined(__x86_64__)
+#include <shader/path_tracer_emulator.comp.u32>
+#else
 #include <shader/path_tracer.comp.u32>
+#endif
 	};
 	auto shader_module = myvk::ShaderModule::Create(device, kCompSpv, sizeof(kCompSpv));
 	shader_module->AddSpecialization(0, (uint32_t)m_scene_ptr->GetTextures().size());

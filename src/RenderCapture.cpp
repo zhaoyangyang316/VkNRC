@@ -1,5 +1,7 @@
 #include "RenderCapture.hpp"
+#ifndef __ANDROID__
 #include "CaptureCaption.hpp"
+#endif
 
 #include <array>
 #include <bit>
@@ -87,11 +89,19 @@ void WriteCaptureMetadata(std::ostream &output, const CaptureRenderSettings &set
 // Minimal single-part, uncompressed scanline layout from
 // https://openexr.com/en/latest/OpenEXRFileLayout.html
 void WriteEXR(std::ostream &output, VkExtent3D extent, const float *rgba, const CaptureMetadata *metadata) {
+#ifdef __ANDROID__
+	// Android exports clean linear pixels and optional EXR header metadata.
+	if (metadata && metadata->print_caption) {
+		output.setstate(std::ios::failbit);
+		return;
+	}
+#else
 	capture_detail::Caption caption;
 	if (metadata && metadata->print_caption && !capture_detail::MakeCaption(caption, extent, *metadata)) {
 		output.setstate(std::ios::failbit);
 		return;
 	}
+#endif
 	WriteValue(output, uint32_t{20000630}); // OpenEXR magic number
 	WriteValue(output, uint32_t{2});        // File version, no flags
 	// Each one-letter channel name takes two bytes, followed by four 32-bit fields.
@@ -146,7 +156,9 @@ void WriteEXR(std::ostream &output, VkExtent3D extent, const float *rgba, const 
 			row[extent.width + x] = source[4 * x + 1];
 			row[2 * size_t{extent.width} + x] = source[4 * x];
 		}
+#ifndef __ANDROID__
 		caption.CompositeRow(y, extent.width, row.data());
+#endif
 		output.write(reinterpret_cast<const char *>(row.data()), row_bytes);
 	}
 }

@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.20)
+project(VkNRCKhrCheck LANGUAGES CXX)
+find_package(Vulkan REQUIRED)
+add_executable(khr_matrix_check main.cpp)
+target_link_libraries(khr_matrix_check PRIVATE Vulkan::Vulkan)
+target_compile_features(khr_matrix_check PRIVATE cxx_std_17)

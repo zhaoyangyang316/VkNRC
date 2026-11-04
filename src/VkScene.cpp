@@ -130,12 +130,13 @@ void VkScene::upload_buffers(const Scene &scene, std::span<const Material> mater
 		command_buffer->CmdCopy(src, *p_dst, {{0, 0, src->GetSize()}});
 	};
 	command_buffer->Begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-	constexpr VkBufferUsageFlags kASInputUsages = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-	                                              VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+	const VkBufferUsageFlags as_input_usage = device->IsAccelerationStructureEnabled()
+	    ? VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+	    : 0;
 
-	cmd_create_copy(vertex_staging_buffer, &m_vertex_buffer, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | kASInputUsages);
+	cmd_create_copy(vertex_staging_buffer, &m_vertex_buffer, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | as_input_usage);
 	cmd_create_copy(vertex_index_staging_buffer, &m_vertex_index_buffer,
-	                VK_BUFFER_USAGE_INDEX_BUFFER_BIT | kASInputUsages);
+	                VK_BUFFER_USAGE_INDEX_BUFFER_BIT | as_input_usage);
 	cmd_create_copy(texcoord_staging_buffer, &m_texcoord_buffer, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
 	cmd_create_copy(texcoord_index_staging_buffer, &m_texcoord_index_buffer, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
 	cmd_create_copy(material_id_staging_buffer, &m_material_id_buffer, 0);

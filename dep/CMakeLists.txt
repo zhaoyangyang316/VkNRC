@@ -10,10 +10,13 @@ add_subdirectory(half)
 
 add_library(dep INTERFACE)
 target_link_libraries(dep INTERFACE
-        myvk::vulkan myvk::glfw myvk::rg myvk::imgui
+        myvk::vulkan myvk::rg
         glm
         stb_image
         tinyobjloader
         spdlog::spdlog
         half::half
 )
+if (NOT ANDROID)
+    target_link_libraries(dep INTERFACE myvk::glfw myvk::imgui)
+endif ()

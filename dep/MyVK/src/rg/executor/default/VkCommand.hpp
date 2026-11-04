@@ -9,6 +9,7 @@
 #include "../Barrier.hpp"
 #include "Schedule.hpp"
 #include "VkAllocation.hpp"
+#include <stdexcept>
 
 namespace myvk_rg_executor {
 
@@ -53,7 +54,10 @@ public:
 		}
 	}
 	static const myvk::Ptr<myvk::PipelineBase> &GetVkPipeline(const PassBase *p_pass) {
-		return GetPassInfo(p_pass).vk_command.vk_pipeline;
+		const auto &pipeline = GetPassInfo(p_pass).vk_command.vk_pipeline;
+		if (!pipeline)
+			throw std::runtime_error("Could not create Vulkan pipeline for pass " + p_pass->GetGlobalKey().Format());
+		return pipeline;
 	}
 	static void UpdatePipeline(const PassBase *p_pass) { GetPassInfo(p_pass).vk_command.update_pipeline = true; }
 };

@@ -1,7 +1,8 @@
 #version 460
 #extension GL_EXT_control_flow_attributes : enable
-#extension GL_EXT_ray_tracing : enable
+#ifndef NRC_EMULATOR
 #extension GL_EXT_ray_query : enable
+#endif
 #extension GL_KHR_shader_subgroup_ballot : enable
 #extension GL_KHR_shader_subgroup_basic : enable
 #extension GL_KHR_shader_subgroup_vote : enable
@@ -17,7 +18,9 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 #include "CookTorranceBRDF.glsl"
 #include "NRCRecord.glsl"
 
+#ifndef NRC_EMULATOR
 #define SCENE_TLAS_BINDING 0
+#endif
 #define SCENE_TEXTURE_BINDING 8
 #define SCENE_TEXTURE_NUM_CONST_ID 0
 #define SCENE_BUFFERS_FIRST_BINDING 1
@@ -41,7 +44,9 @@ layout(push_constant) uniform uuPushConstant {
 };
 
 // V-Buffer
+#ifndef NRC_EMULATOR
 layout(binding = 9) uniform usampler2D uPrimitiveID_InstanceID;
+#endif
 // NRC
 layout(binding = 12) buffer uuEvalCount { uint uEvalCount; };
 layout(std430, binding = 13) writeonly buffer uuEvalRecords { NRCEvalRecord uEvalRecords[]; };
@@ -62,6 +67,7 @@ layout(std430, binding = 19) readonly buffer uuLightMembership { uint uLightMemb
 struct Ray {
 	vec3 o, d;
 };
+#include "TraceScene.glsl"
 
 struct Hit {
 	vec3 position;
@@ -112,11 +118,8 @@ Hit GetVBufferHit(in const uint primitive_id, in const uint instance_id, in cons
 	return hit;
 }
 
-Hit GetRayQueryHit(in const rayQueryEXT ray_query, in const Ray ray) {
-	// Base PrimitiveID + Instance PrimitiveID
-	uint primitive_id = rayQueryGetIntersectionInstanceCustomIndexEXT(ray_query, true) +
-	                    rayQueryGetIntersectionPrimitiveIndexEXT(ray_query, true);
-	uint instance_id = rayQueryGetIntersectionInstanceIdEXT(ray_query, true);
+Hit GetSurfaceHit(in const SceneIntersection intersection, in const Ray ray) {
+	uint primitive_id = intersection.primitive_id, instance_id = intersection.instance_id;
 
 	vec2 texcoord_0 = GetSceneTexcoord(primitive_id, 0);
 	vec2 texcoord_1 = GetSceneTexcoord(primitive_id, 1);
@@ -126,7 +129,7 @@ Hit GetRayQueryHit(in const rayQueryEXT ray_query, in const Ray ray) {
 	vec3 vertex_2 = GetSceneVertex(instance_id, primitive_id, 2);
 	vec3 n = normalize(cross(vertex_1 - vertex_0, vertex_2 - vertex_0));
 
-	vec3 barycentric = vec3(0, rayQueryGetIntersectionBarycentricsEXT(ray_query, true));
+	vec3 barycentric = vec3(0, intersection.barycentric);
 	barycentric.x = 1.0 - barycentric.y - barycentric.z;
 
 	Hit hit;
@@ -253,12 +256,8 @@ float TriangleLightPDF(in const uint primitive_id, in const uint instance_id,
 }
 
 bool ShadowVisible(in const vec3 origin, in const vec3 direction, in const float distance) {
-	rayQueryEXT shadow;
-	rayQueryInitializeEXT(shadow, uTLAS, gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT,
-	                      0xFF, origin, T_MIN, direction, distance);
-	while (rayQueryProceedEXT(shadow))
-		;
-	return rayQueryGetIntersectionTypeEXT(shadow, true) == gl_RayQueryCommittedIntersectionNoneEXT;
+	SceneIntersection shadow;
+	return !IntersectScene(Ray(origin, direction), distance, true, shadow);
 }
 
 vec3 SampleDirectLight(in const Hit hit, in const Ray incoming_ray) {
@@ -447,11 +446,8 @@ PathTraceResult TracePath(Hit hit, Ray ray, in const uint method, in const bool 
 		}
 
 		ray = step.ray;
-		rayQueryEXT ray_query;
-		rayQueryInitializeEXT(ray_query, uTLAS, gl_RayFlagsOpaqueEXT, 0xFF, ray.o, T_MIN, ray.d, T_MAX);
-		while (rayQueryProceedEXT(ray_query))
-			;
-		if (rayQueryGetIntersectionTypeEXT(ray_query, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
+		SceneIntersection next_hit;
+		if (!IntersectScene(ray, T_MAX, false, next_hit)) {
 			float environment_mis = uUseNEE != 0 && kEnvironmentIntensity > 0.0 && kLightCount == 0
 			                            ? PowerMIS(step.pdf, max(dot(hit.normal, ray.d), 0.0) / M_PI)
 			                            : 1.0;
@@ -463,7 +459,7 @@ PathTraceResult TracePath(Hit hit, Ray ray, in const uint method, in const bool 
 			}
 			break;
 		}
-		hit = GetRayQueryHit(ray_query, ray);
+		hit = GetSurfaceHit(next_hit, ray);
 		// Balance only the emitter hit against NEE at its predecessor. A cache
 		// prediction at this hit is a separate scattered-radiance contribution.
 		emission_mis = uUseNEE != 0
@@ -485,8 +481,20 @@ PathTraceResult TracePath(Hit hit, Ray ray, in const uint method, in const bool 
 
 	if (train_count > 0) {
 		uint batch = min(uint(RNGNext() * NRC_TRAIN_BATCH_COUNT), NRC_TRAIN_BATCH_COUNT - 1u);
-		uint first = atomicAdd(uBatchTrainCounts[batch].count, train_count, gl_ScopeQueueFamily,
+#ifdef NRC_EMULATOR
+#define RESERVE_SLOT(i) atomicAdd(uBatchTrainCounts[i].count, train_count, gl_ScopeQueueFamily, gl_StorageSemanticsBuffer, gl_SemanticsRelaxed)
+		uint first;
+		switch (batch) {
+		case 0u: first = RESERVE_SLOT(0); break;
+		case 1u: first = RESERVE_SLOT(1); break;
+		case 2u: first = RESERVE_SLOT(2); break;
+		default: first = RESERVE_SLOT(3); break;
+		}
+#undef RESERVE_SLOT
+#else
+		uint first = atomicAdd(uBatchTrainCounts[NRC_BATCH_DESCRIPTOR(batch)].count, train_count, gl_ScopeQueueFamily,
 		                       gl_StorageSemanticsBuffer, gl_SemanticsRelaxed);
+#endif
 		if (first < NRC_TRAIN_BATCH_SIZE) {
 			uint count = min(train_count, NRC_TRAIN_BATCH_SIZE - first);
 			for (uint i = 0; i < count; ++i) {
@@ -499,7 +507,16 @@ PathTraceResult TracePath(Hit hit, Ray ray, in const uint method, in const bool 
 				record.factor_g = factor.g;
 				record.factor_b = factor.b;
 				record.packed_input = train_input[i];
-				uBatchTrainRecords[batch].records[first + i] = record;
+#ifdef NRC_EMULATOR
+				switch (batch) {
+				case 0u: uBatchTrainRecords[0].records[first + i] = record; break;
+				case 1u: uBatchTrainRecords[1].records[first + i] = record; break;
+				case 2u: uBatchTrainRecords[2].records[first + i] = record; break;
+				default: uBatchTrainRecords[3].records[first + i] = record; break;
+				}
+#else
+				uBatchTrainRecords[NRC_BATCH_DESCRIPTOR(batch)].records[first + i] = record;
+#endif
 			}
 			if (bootstrap) {
 				uint eval_id = atomicAdd(uEvalCount, 1u, gl_ScopeQueueFamily, gl_StorageSemanticsBuffer,
@@ -527,14 +544,18 @@ void main() {
 		train = RNGNext() < uTrainProbability;
 	train = subgroupBroadcastFirst(train);
 
+	vec2 clip = (vec2(coord) + 0.5) / vec2(uExtent) * 2.0 - 1.0;
+	Ray ray = Ray(uOrigin, normalize(uLook + clip.x * uSide + clip.y * uUp));
+	PathTraceResult result = PathTraceResult(uIndirectOnly == 0 ? kConstLight : vec3(0), vec3(0));
+#ifdef NRC_EMULATOR
+	SceneIntersection primary;
+	if (IntersectScene(ray, 10.0, false, primary)) {
+		Hit hit = GetSurfaceHit(primary, ray);
+#else
 	uvec2 primitive_instance = texelFetch(uPrimitiveID_InstanceID, ivec2(coord), 0).rg;
-	PathTraceResult result;
-	if (primitive_instance.x == -1u)
-		result = PathTraceResult(uIndirectOnly == 0 ? kConstLight : vec3(0), vec3(0));
-	else {
-		vec2 clip = (vec2(coord) + 0.5) / vec2(uExtent) * 2.0 - 1.0;
-		Ray ray = Ray(uOrigin, normalize(uLook + clip.x * uSide + clip.y * uUp));
+	if (primitive_instance.x != -1u) {
 		Hit hit = GetVBufferHit(primitive_instance.x, primitive_instance.y, ray);
+#endif
 		result = TracePath(hit, ray, method, train);
 	}
 	result.bias = NormalizeRGB(result.bias);

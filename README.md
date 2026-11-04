@@ -8,8 +8,21 @@
 Vulkan Implementation of NVIDIA's
 paper [Real-time Neural Radiance Caching for Path Tracing](https://research.nvidia.com/publication/2021-06_real-time-neural-radiance-caching-path-tracing).
 
-The Fully-Fused MLP is implemented with VK_NV_cooperative_matrix (the KHR one is too limited), and it has better
-backpropagation performance than the author's [tiny-cuda-nn](https://github.com/NVlabs/tiny-cuda-nn).
+The desktop MLP uses `VK_NV_cooperative_matrix`. The arm64 Android renderer queries the phone's supported
+`VK_KHR_cooperative_matrix` tile shapes for inference and training. The x86_64 Android Emulator runs the network with scalar GPU compute.
+
+## Build for Android
+
+On the prepared Windows checkout, run these commands from the repository root in PowerShell.
+
+```powershell
+python .\scripts\build-android.py --abi x86_64 --sdk .\build\android-tools\sdk --jdk .\build\android-tools\jdk
+.\scripts\run-android-emulator.ps1
+```
+
+To build for the iQOO 15, use `--abi arm64-v8a`. Both APKs are written to `build/android/`.
+For a fresh machine, follow the [Android setup, compilation and installation guide](docs/android-build.md).
+The [Android port notes](docs/android-port.md) cover the controls, validation results, and handset test plan.
 
 ## Build on Windows
 

@@ -66,6 +66,10 @@ if (MYVK_TESTING)
     target_compile_definitions(MyVK_RenderGraph PUBLIC MYVK_RG_DEBUG)
 endif ()
 
+if (ANDROID)
+    return()
+endif ()
+
 add_library(MyVK_GLFW STATIC
         src/glfw/Surface.cpp
         src/glfw/Swapchain.cpp

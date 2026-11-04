@@ -17,6 +17,7 @@ private:
 	Ptr<PhysicalDevice> m_physical_device_ptr;
 
 	PhysicalDeviceFeatures m_features;
+	bool m_acceleration_structure_enabled{};
 	VkDevice m_device{VK_NULL_HANDLE};
 	VkPipelineCache m_pipeline_cache{VK_NULL_HANDLE};
 	VmaAllocator m_allocator{VK_NULL_HANDLE}, m_dev_addr_allocator{VK_NULL_HANDLE};
@@ -36,6 +37,7 @@ public:
 	inline const Ptr<PhysicalDevice> &GetPhysicalDevicePtr() const { return m_physical_device_ptr; }
 	inline VkDevice GetHandle() const { return m_device; }
 	inline const PhysicalDeviceFeatures &GetEnabledFeatures() const { return m_features; }
+	inline bool IsAccelerationStructureEnabled() const { return m_acceleration_structure_enabled; }
 
 	VkResult WaitIdle() const;
 

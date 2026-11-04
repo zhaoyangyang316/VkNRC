@@ -3,6 +3,7 @@
 //
 
 #include "VkSceneBLAS.hpp"
+#include "VkBuildScratch.hpp"
 #include <myvk/CommandBuffer.hpp>
 #include <myvk/QueryPool.hpp>
 
@@ -48,8 +49,7 @@ void VkSceneBLAS::create_blas_s() {
 		blas_pp_build_ranges[instance_id] = blas_build_ranges.data() + instance_id;
 
 	// Objects for Construction
-	auto scratch_buffer = myvk::Buffer::Create(
-	    device, max_scratch_size, 0, VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+	auto scratch = VkBuildScratch::Create(device, max_scratch_size);
 	auto query_pool = myvk::QueryPool::Create(device, VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,
 	                                          m_scene_ptr->GetInstanceCount());
 	auto command_pool = myvk::CommandPool::Create(m_scene_ptr->GetQueuePtr());
@@ -75,7 +75,7 @@ void VkSceneBLAS::create_blas_s() {
 			m_blas_s[instance_id] = accel_struct;
 
 			build_geom.dstAccelerationStructure = accel_struct->GetHandle();
-			build_geom.scratchData.deviceAddress = scratch_buffer->GetDeviceAddress();
+			build_geom.scratchData.deviceAddress = scratch.address;
 
 			VkAccelerationStructureBuildRangeInfoKHR *p_build_range = &build_range;
 
@@ -84,7 +84,7 @@ void VkSceneBLAS::create_blas_s() {
 			command_buffer->CmdPipelineBarrier(
 			    VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
 			    VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, {},
-			    {scratch_buffer->GetMemoryBarrier(VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+			    {scratch.buffer->GetMemoryBarrier(VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
 			                                      VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR |
 			                                          VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR)},
 			    {});

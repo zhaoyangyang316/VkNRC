@@ -20,12 +20,26 @@ layout(std430, binding = 8) readonly buffer uuEvalRecords { NRCEvalRecord uEvalR
 layout(binding = 9) uniform uuEvalCount { uint uEvalCount; };
 
 #define WEIGHTS_BINDING 10
+#ifdef NRC_KHR
+#include "NN_khr.glsl"
+#else
 #include "NN_nv.glsl"
+#endif
 
 layout(binding = 11, rgba32f) uniform image2D uBias_FactorR;
 layout(binding = 12, rg32f) readonly uniform image2D uFactorGB;
 layout(std430, binding = 13) buffer uuBatchTrainRecords { NRCTrainRecord records[]; }
 uBatchTrainRecords[NRC_TRAIN_BATCH_COUNT];
+
+#ifdef NRC_SCALAR
+// Constant descriptor slots also work on emulator drivers that lack nonuniform
+// indexing of storage buffer arrays. Each record belongs to one training suffix.
+void applyPrediction(inout NRCTrainRecord record, vec3 predict) {
+	record.bias_r += record.factor_r * predict.r;
+	record.bias_g += record.factor_g * predict.g;
+	record.bias_b += record.factor_b * predict.b;
+}
+#endif
 
 void main() {
 	uint dst = NRC_EVAL_INVALID_DST;
@@ -37,6 +51,9 @@ void main() {
 		dst = eval_record.dst;
 	}
 
+#ifdef NRC_KHR
+	vec3 predict = evaluateKHR(inputs, vec3(0));
+#else
 	fcoopmatNV<16, gl_ScopeSubgroup, 16, 16> act_coopmats[2][COOPMAT_X][SUBGROUP_ACT_COOPMAT_Y];
 	NNLoadInput(inputs, act_coopmats[0]);
 	NNForward64_ReLU(0, act_coopmats[0], act_coopmats[1]);
@@ -46,6 +63,7 @@ void main() {
 	NNForward64_ReLU(4, act_coopmats[0], act_coopmats[1]);
 	NNForward3(5, act_coopmats[1], act_coopmats[0][0]);
 	vec3 predict = NNOutput3(act_coopmats[0][0]);
+#endif
 	// A nonfinite cache estimate must not erase already traced emission or poison
 	// the next frame's self-training targets (including through 0 * infinity).
 	for (uint channel = 0; channel < 3; ++channel)
@@ -66,13 +84,22 @@ void main() {
 		uint b, l, r;
 		DecodeNRCEvalDstTrain(dst, b, l, r);
 		[[unroll]] for (uint i = l; i <= r; ++i) {
-			NRCTrainRecord train_record = uBatchTrainRecords[b].records[i];
+#ifdef NRC_SCALAR
+			switch (b) {
+				case 0u: applyPrediction(uBatchTrainRecords[0].records[i], predict); break;
+				case 1u: applyPrediction(uBatchTrainRecords[1].records[i], predict); break;
+				case 2u: applyPrediction(uBatchTrainRecords[2].records[i], predict); break;
+				case 3u: applyPrediction(uBatchTrainRecords[3].records[i], predict); break;
+			}
+#else
+			NRCTrainRecord train_record = uBatchTrainRecords[NRC_BATCH_DESCRIPTOR(b)].records[i];
 			vec3 bias = vec3(train_record.bias_r, train_record.bias_g, train_record.bias_b);
 			vec3 factor = vec3(train_record.factor_r, train_record.factor_g, train_record.factor_b);
 			vec3 color = bias + factor * predict;
-			uBatchTrainRecords[b].records[i].bias_r = color.r;
-			uBatchTrainRecords[b].records[i].bias_g = color.g;
-			uBatchTrainRecords[b].records[i].bias_b = color.b;
+			uBatchTrainRecords[NRC_BATCH_DESCRIPTOR(b)].records[i].bias_r = color.r;
+			uBatchTrainRecords[NRC_BATCH_DESCRIPTOR(b)].records[i].bias_g = color.g;
+			uBatchTrainRecords[NRC_BATCH_DESCRIPTOR(b)].records[i].bias_b = color.b;
+#endif
 		}
 	}
 }

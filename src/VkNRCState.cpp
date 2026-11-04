@@ -86,7 +86,7 @@ void VkNRCState::ResetMLPBuffers() {
 	m_use_weights = myvk::Buffer::Create(GetDevicePtr(), GetWeightCount() * sizeof(uint16_t), 0,
 	                                     VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 	m_optimizer_state = myvk::Buffer::Create(GetDevicePtr(), sizeof(nrc::OptimizerState), 0,
-	                                         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+	                                         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
 	                                             VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
 	m_optimizer_entries = myvk::Buffer::Create(GetDevicePtr(), GetWeightCount() * sizeof(nrc::OptimizerEntry), 0,
 	                                           VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
@@ -112,11 +112,10 @@ void VkNRCState::ResetMLPBuffers() {
 }
 
 uint32_t VkNRCState::max_accumulation_window(VkExtent2D extent) const {
-	constexpr VkDeviceSize kHistoryBudget = VkDeviceSize{1} << 30;
 	constexpr uint32_t kMaxHistoryLayers = 64;
 	const VkDeviceSize bytes_per_layer = VkDeviceSize{std::max(extent.width, 1u)} *
 	                                     std::max(extent.height, 1u) * 4u * sizeof(float);
-	const uint32_t budget_layers = static_cast<uint32_t>(kHistoryBudget / bytes_per_layer);
+	const uint32_t budget_layers = static_cast<uint32_t>(m_history_budget / bytes_per_layer);
 	const uint32_t device_layers =
 	    GetDevicePtr()->GetPhysicalDevicePtr()->GetProperties().vk10.limits.maxImageArrayLayers;
 	return std::max(1u, std::min({kMaxHistoryLayers, budget_layers, device_layers}));

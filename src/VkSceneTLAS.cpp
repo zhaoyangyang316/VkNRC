@@ -3,6 +3,7 @@
 //
 
 #include "VkSceneTLAS.hpp"
+#include "VkBuildScratch.hpp"
 
 #include <spdlog/spdlog.h>
 
@@ -62,10 +63,8 @@ void VkSceneTLAS::create_tlas() {
 
 	auto tlas = myvk::AccelerationStructure::Create(device, build_size.accelerationStructureSize,
 	                                                VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR);
-	auto scratch_buffer =
-	    myvk::Buffer::Create(device, m_tlas ? build_size.updateScratchSize : build_size.buildScratchSize, 0,
-	                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-	build_geom.scratchData.deviceAddress = scratch_buffer->GetDeviceAddress();
+	auto scratch = VkBuildScratch::Create(device, m_tlas ? build_size.updateScratchSize : build_size.buildScratchSize);
+	build_geom.scratchData.deviceAddress = scratch.address;
 	build_geom.dstAccelerationStructure = tlas->GetHandle();
 
 	VkAccelerationStructureBuildRangeInfoKHR build_range{.primitiveCount = m_scene_ptr->GetInstanceCount()};

@@ -5,6 +5,12 @@
 #define NRC_HIDDEN_LAYERS 5
 #define NRC_TRAIN_BATCH_COUNT 4
 #define NRC_TRAIN_BATCH_SIZE 16384
+#ifdef VKNRC_ANDROID
+// Rays in one subgroup can choose different training buffers.
+#define NRC_BATCH_DESCRIPTOR(index) nonuniformEXT(index)
+#else
+#define NRC_BATCH_DESCRIPTOR(index) (index)
+#endif
 // Backpropagation and per-subgroup gradient sums use FP16. Reduce their range
 // before accumulation; the optimizer divides by this scale again in FP32.
 #define LOSS_SCALE (1.0 / 128.0)

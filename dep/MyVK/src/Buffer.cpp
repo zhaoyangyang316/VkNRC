@@ -43,7 +43,8 @@ Ptr<Buffer> Buffer::Create(const Ptr<Device> &device, const VkBufferCreateInfo &
 
 	VmaAllocationInfo allocation_info;
 
-	if (vmaCreateBuffer(ret->get_allocator_handle(), &new_info, &alloc_create_info, &ret->m_buffer, &ret->m_allocation,
+	auto allocator = ret->get_allocator_handle();
+	if (!allocator || vmaCreateBuffer(allocator, &new_info, &alloc_create_info, &ret->m_buffer, &ret->m_allocation,
 	                    &allocation_info) != VK_SUCCESS)
 		return nullptr;
 	ret->m_mapped_ptr = allocation_info.pMappedData;

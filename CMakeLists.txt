@@ -15,7 +15,7 @@ if (MINGW)
     set(CMAKE_EXE_LINKER_FLAGS "-static-libgcc -static-libstdc++ -static")
 endif ()
 
-if (CMAKE_BUILD_TYPE STREQUAL "Release" AND NOT MINGW)
+if (CMAKE_BUILD_TYPE STREQUAL "Release" AND NOT MINGW AND NOT ANDROID)
     include(CheckIPOSupported)
     check_ipo_supported(RESULT IPO_SUPPORTED)
     if (IPO_SUPPORTED)
@@ -28,14 +28,8 @@ add_subdirectory(dep)
 add_subdirectory(shader)
 # add_subdirectory(test)
 
-add_executable(VkNRC
-        src/main.cpp
-        src/RenderCapture.cpp
-        src/Camera.cpp
+set(VKNRC_RENDER_SOURCES
         src/Scene.cpp
-        src/SceneCatalog.cpp
-        # src/Sobol.cpp
-        # src/BlueNoise.cpp
         src/VkScene.cpp
         src/VkSceneBLAS.cpp
         src/VkSceneTLAS.cpp
@@ -50,6 +44,19 @@ add_executable(VkNRC
         src/rg/NNTrain.cpp
         src/rg/NNGradientShader.cpp
 )
+if (ANDROID)
+    set(NATIVE_GLUE "${CMAKE_ANDROID_NDK}/sources/android/native_app_glue")
+    add_library(vknrc SHARED
+            src/android/AndroidMain.cpp src/android/AndroidDevice.cpp src/android/EmulatorPreview.cpp
+            src/android/AndroidFrameTools.cpp src/RenderCapture.cpp
+            ${VKNRC_RENDER_SOURCES} "${NATIVE_GLUE}/android_native_app_glue.c")
+    target_include_directories(vknrc PRIVATE "${NATIVE_GLUE}")
+    target_link_libraries(vknrc PRIVATE dep shader android log)
+    target_link_options(vknrc PRIVATE "-Wl,-u,ANativeActivity_onCreate")
+    return()
+endif ()
+
+add_executable(VkNRC src/main.cpp src/RenderCapture.cpp src/Camera.cpp src/SceneCatalog.cpp ${VKNRC_RENDER_SOURCES})
 target_link_libraries(VkNRC PRIVATE dep shader)
 target_compile_definitions(VkNRC PRIVATE VKNRC_ASSET_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 set_target_properties(VkNRC PROPERTIES

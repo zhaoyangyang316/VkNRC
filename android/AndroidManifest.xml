@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="org.vknrc.demo" android:versionCode="1" android:versionName="0.1">
+    <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="35" />
+    <application android:label="VkNRC" android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
+        android:extractNativeLibs="false" android:debuggable="true" android:allowBackup="false">
+        <activity android:name=".VkNRCActivity" android:exported="false" android:launchMode="singleTask"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|density">
+            <meta-data android:name="android.app.lib_name" android:value="vknrc" />
+        </activity>
+        <activity android:name=".LauncherActivity" android:exported="true" android:screenOrientation="landscape">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

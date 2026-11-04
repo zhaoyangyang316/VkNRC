@@ -11,14 +11,17 @@
 #include "ScreenPass.hpp"
 #include "VBufferPass.hpp"
 
+#ifdef MYVK_ENABLE_GLFW
 #include <myvk_rg/pass/ImGuiPass.hpp>
+#include <myvk_rg/resource/SwapchainImage.hpp>
+#endif
 #include <myvk_rg/resource/AccelerationStructure.hpp>
 #include <myvk_rg/resource/InputBuffer.hpp>
 #include <myvk_rg/resource/InputImage.hpp>
-#include <myvk_rg/resource/SwapchainImage.hpp>
 
 namespace rg {
 
+#ifdef MYVK_ENABLE_GLFW
 PresentRenderGraph::PresentRenderGraph(const myvk::Ptr<myvk::FrameManager> &frame_manager,
                                        const myvk::Ptr<myvk::ImageView> &linear_image)
     : RenderGraphBase(frame_manager->GetDevicePtr()) {
@@ -40,21 +43,26 @@ PresentRenderGraph::PresentRenderGraph(const myvk::Ptr<myvk::FrameManager> &fram
 	auto imgui_pass = CreatePass<myvk_rg::ImGuiPass>({"imgui_pass"}, screen_pass->GetScreenOutput());
 	AddResult({"present"}, imgui_pass->GetImageOutput());
 }
+#endif
 
-NRCRenderGraph::NRCRenderGraph(const myvk::Ptr<myvk::FrameManager> &frame_manager,
-                               const myvk::Ptr<VkSceneTLAS> &scene_tlas_ptr, const myvk::Ptr<VkNRCState> &nrc_state_ptr,
-                               const myvk::Ptr<Camera> &camera_ptr)
-    : RenderGraphBase(frame_manager->GetDevicePtr()), m_scene_tlas_ptr(scene_tlas_ptr),
-      m_scene_ptr(scene_tlas_ptr->GetScenePtr()), m_nrc_state_ptr(nrc_state_ptr) {
+NRCRenderGraph::NRCRenderGraph(const myvk::Ptr<VkScene> &scene, const myvk::Ptr<VkNRCState> &nrc_state_ptr,
+                               const myvk::Ptr<Camera> &camera_ptr, const myvk::Ptr<VkSceneTLAS> &scene_tlas_ptr)
+    : RenderGraphBase(scene->GetDevicePtr()), m_scene_tlas_ptr(scene_tlas_ptr),
+      m_scene_ptr(scene), m_nrc_state_ptr(nrc_state_ptr) {
 	SceneResources scene_resources = create_scene_resources();
 	NRCResources nrc_resources = create_nrc_resources();
 
-	auto vbuffer_pass = CreatePass<VBufferPass>(
-	    {"vbuffer_pass"},
-	    VBufferPass::Args{.scene_ptr = m_scene_ptr, .scene_resources = scene_resources, .camera_ptr = camera_ptr});
+	std::optional<myvk_rg::Image> vbuffer;
+	if (scene_tlas_ptr) {
+		auto pass = CreatePass<VBufferPass>({"vbuffer_pass"}, VBufferPass::Args{
+		    .scene_ptr = m_scene_ptr, .scene_resources = scene_resources, .camera_ptr = camera_ptr});
+		vbuffer = pass->GetVBufferOutput();
+	} else if (scene->GetInstanceCount() != 1) {
+		throw std::invalid_argument("Reference traversal requires a single scene instance");
+	}
 
 	auto path_tracer_pass = CreatePass<PathTracerPass>(
-	    {"path_tracer_pass"}, PathTracerPass::Args{.vbuffer_image = vbuffer_pass->GetVBufferOutput(),
+	    {"path_tracer_pass"}, PathTracerPass::Args{.vbuffer_image = vbuffer,
 	                                               .scene_ptr = m_scene_ptr,
 	                                               .scene_resources = scene_resources,
 	                                               .nrc_state_ptr = m_nrc_state_ptr,
@@ -116,7 +124,8 @@ NRCRenderGraph::NRCRenderGraph(const myvk::Ptr<myvk::FrameManager> &frame_manage
 
 void NRCRenderGraph::PreExecute() const {
 	// Update Externals
-	GetResource<myvk_rg::AccelerationStructure>({"tlas"})->SetAS(m_scene_tlas_ptr->GetTLAS());
+	if (m_scene_tlas_ptr)
+		GetResource<myvk_rg::AccelerationStructure>({"tlas"})->SetAS(m_scene_tlas_ptr->GetTLAS());
 	GetResource<myvk_rg::InputImage>({"accumulate"})->SetVkImageView(m_nrc_state_ptr->GetAccumulateImageView());
 	GetResource<myvk_rg::InputImage>({"history"})->SetVkImageView(m_nrc_state_ptr->GetHistoryImageView());
 	GetResource<myvk_rg::InputBuffer>({"weights"})->SetBufferView(m_nrc_state_ptr->GetWeightBuffer());
@@ -136,7 +145,6 @@ SceneResources NRCRenderGraph::create_scene_resources() {
 	transform_buffer->SetMapped(true);
 
 	SceneResources sr = {
-	    .tlas = CreateResource<myvk_rg::AccelerationStructure>({"tlas"}, m_scene_tlas_ptr->GetTLAS())->Alias(),
 	    .vertices = CreateResource<myvk_rg::InputBuffer>({"vertices"}, m_scene_ptr->GetVertexBuffer())->Alias(),
 	    .vertex_indices =
 	        CreateResource<myvk_rg::InputBuffer>({"vertex_indices"}, m_scene_ptr->GetVertexIndexBuffer())->Alias(),
@@ -152,6 +160,8 @@ SceneResources NRCRenderGraph::create_scene_resources() {
 	        CreateResource<myvk_rg::InputBuffer>({"light_membership"}, m_scene_ptr->GetLightMembershipBuffer())->Alias(),
 	    .texture_sampler = myvk::Sampler::Create(GetDevicePtr(), VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT),
 	};
+	if (m_scene_tlas_ptr)
+		sr.tlas = CreateResource<myvk_rg::AccelerationStructure>({"tlas"}, m_scene_tlas_ptr->GetTLAS())->Alias();
 	for (uint32_t tex_id = 0; const auto &texture : m_scene_ptr->GetTextures())
 		sr.textures.push_back(CreateResource<myvk_rg::InputImage>({"texture", tex_id++}, texture)->Alias());
 	return sr;

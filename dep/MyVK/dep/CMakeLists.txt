@@ -10,6 +10,10 @@ add_library(MyVK_Dep_Vulkan STATIC
 target_include_directories(MyVK_Dep_Vulkan PUBLIC vma volk vulkan)
 target_compile_definitions(MyVK_Dep_Vulkan PUBLIC VK_NO_PROTOTYPES)
 target_link_libraries(MyVK_Dep_Vulkan PRIVATE ${CMAKE_DL_LIBS})
+if (ANDROID)
+    target_compile_definitions(MyVK_Dep_Vulkan PUBLIC VK_USE_PLATFORM_ANDROID_KHR)
+    return()
+endif ()
 
 add_subdirectory(glfw)
 add_library(MyVK_Dep_GLFW INTERFACE)

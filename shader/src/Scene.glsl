@@ -1,7 +1,7 @@
 #ifndef SCENE_GLSL
 #define SCENE_GLSL
 
-#if defined(SCENE_TEXTURE_BINDING) && defined(SCENE_TEXTURE_NUM_CONST_ID)
+#if !defined(NRC_EMULATOR) && defined(SCENE_TEXTURE_BINDING) && defined(SCENE_TEXTURE_NUM_CONST_ID)
 #extension GL_EXT_nonuniform_qualifier : require
 #endif
 
@@ -61,6 +61,12 @@ vec2 GetSceneTexcoord(in const uint primitive_id, in const uint vert_id) {
 Material GetSceneMaterial(in const uint primitive_id) { return uMaterials[uMaterialIDs[primitive_id]]; }
 
 #if defined(SCENE_TEXTURE_BINDING) && defined(SCENE_TEXTURE_NUM_CONST_ID)
+#ifdef NRC_EMULATOR
+// The Cornell emulator fixture contains only constant materials.
+vec3 GetSceneDiffuse(Material mat, vec2 texcoord) { return mat.diffuse; }
+vec3 GetSceneSpecular(Material mat, vec2 texcoord) { return mat.specular; }
+vec3 GetSceneEmission(Material mat, vec2 texcoord) { return mat.emission; }
+#else
 layout(constant_id = SCENE_TEXTURE_NUM_CONST_ID) const uint kTextureNum = 1024;
 layout(set = SCENE_SET_ID, binding = SCENE_TEXTURE_BINDING) uniform sampler2D uTextures[kTextureNum];
 
@@ -73,6 +79,7 @@ vec3 GetSceneSpecular(in const Material mat, in const vec2 texcoord) {
 vec3 GetSceneEmission(in const Material mat, in const vec2 texcoord) {
 	return mat.emission_texture_id == -1 ? mat.emission : texture(uTextures[nonuniformEXT(mat.emission_texture_id)], texcoord).rgb;
 }
+#endif
 #endif
 
 #endif

@@ -21,7 +21,11 @@ layout(binding = 9) uniform uuBatchTrainCounts { uint uBatchTrainCount; };
 #define NN_BACKPROPAGATION
 #define WEIGHTS_BINDING 10
 #define DWEIGHTS_BINDING 11
+#ifdef NRC_KHR
+#include "NN_khr.glsl"
+#else
 #include "NN_nv.glsl"
+#endif
 
 void main() {
 	uvec4 inputs[8] = uvec4[8](uvec4(0), uvec4(0), uvec4(0), uvec4(0), uvec4(0), uvec4(0), uvec4(0), uvec4(0));
@@ -33,6 +37,9 @@ void main() {
 		target = vec3(train_record.bias_r, train_record.bias_g, train_record.bias_b);
 	}
 
+#ifdef NRC_KHR
+	evaluateKHR(inputs, target);
+#else
 	fcoopmatNV<16, gl_ScopeSubgroup, 16, 16> act_coopmats[6][COOPMAT_X][SUBGROUP_ACT_COOPMAT_Y],
 	    out_coopmats[SUBGROUP_ACT_COOPMAT_Y];
 	NNLoadInput(inputs, act_coopmats[0]);
@@ -55,4 +62,5 @@ void main() {
 	NNUpdateDW64(1, act_coopmats[2], act_coopmats[1]);
 	NNBackwardDA64_ReLU(1, act_coopmats[2], act_coopmats[1]);
 	NNUpdateDW64(0, act_coopmats[1], act_coopmats[0]);
+#endif
 }

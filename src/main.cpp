@@ -313,7 +313,7 @@ int main(int argc, char **argv) {
 	std::array<myvk::Ptr<rg::NRCRenderGraph>, kFrameCount> render_graphs;
 	const auto rebuild_render_graphs = [&] {
 		for (auto &graph : render_graphs)
-			graph = myvk::MakePtr<rg::NRCRenderGraph>(frame_manager, vk_scene_tlas, vk_nrc_state, camera);
+			graph = myvk::MakePtr<rg::NRCRenderGraph>(vk_scene, vk_nrc_state, camera, vk_scene_tlas);
 	};
 	rebuild_render_graphs();
 	std::array<myvk::Ptr<rg::PresentRenderGraph>, kFrameCount> present_graphs;

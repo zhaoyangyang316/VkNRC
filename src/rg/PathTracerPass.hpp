@@ -19,7 +19,7 @@ namespace rg {
 class PathTracerPass final : public myvk_rg::ComputePassBase {
 public:
 	struct Args {
-		const myvk_rg::Image &vbuffer_image;
+		const std::optional<myvk_rg::Image> &vbuffer_image;
 		const myvk::Ptr<VkScene> &scene_ptr;
 		const SceneResources &scene_resources;
 		const myvk::Ptr<VkNRCState> &nrc_state_ptr;

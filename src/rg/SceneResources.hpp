@@ -7,11 +7,13 @@
 #define VKNRC_RG_SCENERESOURCES_HPP
 
 #include <myvk_rg/RenderGraph.hpp>
+#include <optional>
 
 namespace rg {
 
 struct SceneResources {
-	myvk_rg::Buffer tlas, vertices, vertex_indices, texcoords, texcoord_indices, materials, material_ids, transforms;
+	std::optional<myvk_rg::Buffer> tlas;
+	myvk_rg::Buffer vertices, vertex_indices, texcoords, texcoord_indices, materials, material_ids, transforms;
 	myvk_rg::Buffer lights, light_membership;
 	std::vector<myvk_rg::Image> textures;
 	myvk::Ptr<myvk::Sampler> texture_sampler;

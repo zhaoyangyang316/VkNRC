@@ -51,9 +51,18 @@ Ptr<Device> Device::Create(const Ptr<PhysicalDevice> &physical_device, const Que
 	ret->m_allocator = Allocator::CreateHandle(ret, {});
 	if (ret->m_allocator == VK_NULL_HANDLE)
 		return nullptr;
-	ret->m_dev_addr_allocator = Allocator::CreateHandle(ret, {.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT});
-	if (ret->m_dev_addr_allocator == VK_NULL_HANDLE)
-		return nullptr;
+	if (features.vk12.bufferDeviceAddress) {
+		ret->m_dev_addr_allocator = Allocator::CreateHandle(ret, {.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT});
+		if (ret->m_dev_addr_allocator == VK_NULL_HANDLE)
+			return nullptr;
+	}
+	for (auto *f = reinterpret_cast<const VkBaseInStructure *>(&features.vk11); f; f = f->pNext) {
+		if (f->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR) {
+			ret->m_acceleration_structure_enabled =
+			    reinterpret_cast<const VkPhysicalDeviceAccelerationStructureFeaturesKHR *>(f)->accelerationStructure;
+			break;
+		}
+	}
 	if (ret->create_pipeline_cache() != VK_SUCCESS)
 		return nullptr;
 	ret->m_features = features;

@@ -55,8 +55,11 @@ myvk::Ptr<myvk::ComputePipeline> NNInference::CreatePipeline() const {
 	shader_module->AddSpecialization(0, (uint32_t)m_scene_ptr->GetTextures().size());
 	VkPipelineShaderStageCreateInfo shader_stage =
 	    shader_module->GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_COMPUTE_BIT);
+#if !defined(__ANDROID__) || !defined(__x86_64__)
 	shader_stage.flags |= VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT;
-	shader_stage.pNext = &required_subgroup_info;
+#endif
+	if (required_subgroup_info.requiredSubgroupSize)
+		shader_stage.pNext = &required_subgroup_info;
 	VkComputePipelineCreateInfo create_info{
 	    .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
 	    .stage = shader_stage,
