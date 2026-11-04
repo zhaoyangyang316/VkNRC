@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cmath>
 #include <string_view>
+#include "FrameBenchmark.hpp"
 #include "RenderCapture.hpp"
 #include "SceneCatalog.hpp"
 
@@ -68,9 +69,10 @@ int main(int argc, char **argv) {
 	const auto print_usage = [] {
 		spdlog::info("Usage: VkNRC [scene.obj] [--resolution WIDTHxHEIGHT] [--camera x y z] [--fov degrees] [--max-bounces 1..64] "
 		             "[--accumulate-last samples] [--no-nee] [--indirect-only] [--fast-mode] "
-		             "[--min-roughness 0..1] [--compare output-directory] "
+		             "[--min-roughness 0..1] [--benchmark seconds | --compare output-directory] "
 		             "[--warmup frames] [--samples frames] [--seed number]");
 		spdlog::info("Without a scene argument, opens the bundled Cornell box. Choose other assets in the Scene list.");
+		spdlog::info("--benchmark 1..120 warms up for 32 frames, measures average frame time and FPS, then exits.");
 		spdlog::info("Fixed render resolution (default 1280x720). Available presets:");
 		for (const auto &preset : kResolutions)
 			spdlog::info("  {}", preset.label);
@@ -92,6 +94,7 @@ int main(int argc, char **argv) {
 	float camera_fov{};
 	bool override_position = false, override_fov = false;
 	std::filesystem::path comparison_directory;
+	uint32_t cli_benchmark_seconds = 0;
 	const ResolutionPreset *resolution = &kResolutions[2];
 	uint32_t warmup_frames = 2048, sample_frames = 1024, comparison_seed = 1337;
 	uint32_t max_bounces = VkNRCState::GetDefaultMaxBounces();
@@ -155,6 +158,12 @@ int main(int argc, char **argv) {
 				spdlog::error("Min roughness must be a finite number from 0 to 1");
 				return EXIT_FAILURE;
 			}
+		} else if (option == "--benchmark") {
+			if (i == argc || !parse_uint(argv[i++], cli_benchmark_seconds) || cli_benchmark_seconds < 1 ||
+			    cli_benchmark_seconds > 120) {
+				spdlog::error("Benchmark duration must be an integer from 1 to 120 seconds");
+				return EXIT_FAILURE;
+			}
 		} else if (option == "--compare" && i < argc) {
 			comparison_directory = argv[i++];
 		} else if ((option == "--warmup" || option == "--samples" || option == "--seed") && i < argc) {
@@ -170,6 +179,10 @@ int main(int argc, char **argv) {
 			print_usage();
 			return EXIT_FAILURE;
 		}
+	}
+	if (cli_benchmark_seconds && !comparison_directory.empty()) {
+		spdlog::error("--benchmark and --compare require separate runs");
+		return EXIT_FAILURE;
 	}
 	const auto scene_catalog = DiscoverSceneCatalog(argv[0], custom_scene);
 	auto initial_scene = custom_scene ? scene_catalog.custom_index : scene_catalog.default_index;
@@ -309,7 +322,23 @@ int main(int argc, char **argv) {
 			graph = myvk::MakePtr<rg::PresentRenderGraph>(frame_manager, vk_nrc_state->GetAccumulateImageView());
 	};
 	rebuild_present_graphs();
-	frame_manager->SetResizeFunc([&](VkExtent2D) { rebuild_present_graphs(); });
+	FrameBenchmark benchmark;
+	int benchmark_duration = 5;
+	std::string benchmark_status;
+	bool cli_benchmark_completed = false;
+	if (cli_benchmark_seconds)
+		benchmark.Start(cli_benchmark_seconds);
+	const auto cancel_benchmark = [&](const char *reason) {
+		if (benchmark.IsActive()) {
+			benchmark.Cancel();
+			benchmark_status = reason;
+			spdlog::info("{}", reason);
+		}
+	};
+	frame_manager->SetResizeFunc([&](VkExtent2D) {
+		cancel_benchmark("Benchmark canceled after window resize.");
+		rebuild_present_graphs();
+	});
 	myvk::Ptr<myvk::ImageView> last_rendered_image;
 	CaptureRenderSettings last_rendered_settings{};
 	bool paused = false;
@@ -339,6 +368,10 @@ int main(int argc, char **argv) {
 			glfwWaitEventsTimeout(1.0 / 30.0);
 		else
 			glfwPollEvents();
+		if (benchmark.IsActive() && glfwGetWindowAttrib(window, GLFW_ICONIFIED))
+			cancel_benchmark("Benchmark canceled after window minimize.");
+		if (cli_benchmark_seconds && !benchmark.IsActive())
+			break;
 
 		nrc_train_one_frame = false;
 		std::optional<size_t> requested_scene;
@@ -347,7 +380,29 @@ int main(int argc, char **argv) {
 		myvk::ImGuiNewFrame();
 		ImGui::Begin("Panel");
 		ImGui::Text("FPS %.1f", ImGui::GetIO().Framerate);
-		if (!compare) {
+		if (benchmark.IsActive()) {
+			if (benchmark.IsWarmingUp())
+				ImGui::Text("Benchmark warmup: %u frames left", benchmark.WarmupRemaining());
+			else
+				ImGui::Text("Measuring: %.1f / %u s", benchmark.ElapsedSeconds(), benchmark.DurationSeconds());
+			if (!cli_benchmark_seconds && ImGui::Button("Cancel benchmark"))
+				cancel_benchmark("Benchmark canceled.");
+		} else if (!compare && ImGui::CollapsingHeader("Performance")) {
+			if (paused) {
+				ImGui::TextUnformatted("Resume rendering to benchmark.");
+			} else {
+				ImGui::InputInt("Duration (seconds)", &benchmark_duration);
+				benchmark_duration = std::clamp(benchmark_duration, 1, 120);
+				if (ImGui::Button("Start benchmark")) {
+					benchmark_status.clear();
+					benchmark.Start(static_cast<unsigned>(benchmark_duration));
+				}
+			}
+			if (!benchmark_status.empty())
+				ImGui::TextWrapped("%s", benchmark_status.c_str());
+		}
+		const bool interactive = !compare && !benchmark.IsActive();
+		if (interactive) {
 			if (ImGui::BeginCombo("Scene", scene_catalog.entries[scene_index].label.c_str())) {
 				for (size_t i = 0; i < scene_catalog.entries.size(); ++i) {
 					const bool selected = i == scene_index;
@@ -491,7 +546,7 @@ int main(int argc, char **argv) {
 			const char *phase = comparison_phase == 0 ? "Training" : comparison_phase == 1 ? "NRC capture" : "Path tracing capture";
 			ImGui::Text("%s: %u frames", phase, phase_frames);
 		}
-		if (!compare && !paused && ImGui::CollapsingHeader("View")) {
+		if (interactive && !paused && ImGui::CollapsingHeader("View")) {
 			if (ImGui::Checkbox("Accumulate", &view_accumulate)) {
 				vk_nrc_state->SetAccumulate(view_accumulate);
 			}
@@ -509,7 +564,7 @@ int main(int argc, char **argv) {
 				vk_nrc_state->ResetAccumulateCount();
 			}
 		}
-		if (!compare && !paused && ImGui::CollapsingHeader("NRC")) {
+		if (interactive && !paused && ImGui::CollapsingHeader("NRC")) {
 			if (ImGui::Checkbox("Use EMA", &nrc_use_ema)) {
 				vk_nrc_state->SetUseEMAWeights(nrc_use_ema);
 				vk_nrc_state->ResetAccumulateCount();
@@ -580,8 +635,12 @@ int main(int argc, char **argv) {
 			delta = 0.0;
 		}
 
-		if (!compare && !paused && camera->DragControl(window, &cam_control, delta))
-			vk_nrc_state->ResetAccumulateCount();
+		if (interactive && !paused) {
+			if (camera->DragControl(window, &cam_control, delta))
+				vk_nrc_state->ResetAccumulateCount();
+		} else if (benchmark.IsActive()) {
+			glfwGetCursorPos(window, &cam_control.prev_cursor_pos.x, &cam_control.prev_cursor_pos.y);
+		}
 
 		if ((compare && comparison_phase != 0) || (nrc_lock && !nrc_train_one_frame))
 			vk_nrc_state->SetTrainProbability(0.0f);
@@ -614,6 +673,22 @@ int main(int argc, char **argv) {
 				                          .min_roughness = vk_nrc_state->GetMinRoughness()};
 			}
 			frame_manager->Render();
+			if (benchmark.IsActive()) {
+				if (auto result = benchmark.FinishRenderedFrame([&] { frame_manager->WaitIdle(); })) {
+					benchmark_status = fmt::format(
+					    "{:.3f} ms/frame ({:.2f} FPS), {} frames in {:.3f} s\n"
+					    "{} | {} | Left {} / Right {} | Training {} | NEE {} | Max bounces {} | Fast mode {}",
+					    result->MeanMilliseconds(), result->FramesPerSecond(), result->frames, result->seconds,
+					    last_rendered_settings.scene_name, resolution->label, VkNRCState::MethodName(last_rendered_settings.left_method),
+					    VkNRCState::MethodName(last_rendered_settings.right_method), nrc_lock ? "off" : "on",
+					    view_use_nee ? "on" : "off", view_max_bounces, fast_mode ? "on" : "off");
+					spdlog::info("Benchmark: {}", benchmark_status);
+					if (cli_benchmark_seconds) {
+						cli_benchmark_completed = true;
+						break;
+					}
+				}
+			}
 			if (compare && ++phase_frames == (comparison_phase == 0 ? warmup_frames : sample_frames)) {
 				frame_manager->WaitIdle();
 				if (comparison_phase != 0) {
@@ -641,5 +716,9 @@ int main(int argc, char **argv) {
 	// Presentation can still be using a semaphore after the last render fence signals.
 	device->WaitIdle();
 	glfwTerminate();
+	if (cli_benchmark_seconds && !cli_benchmark_completed) {
+		spdlog::error("Benchmark ended before the measurement completed");
+		return EXIT_FAILURE;
+	}
 	return exit_code;
 }

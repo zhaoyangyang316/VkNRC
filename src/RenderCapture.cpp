@@ -57,7 +57,7 @@ void WriteStringAttribute(std::ostream &output, std::string_view name, std::stri
 }
 
 void WriteCaptureMetadata(std::ostream &output, const CaptureRenderSettings &settings, VkExtent3D extent) {
-	const auto left = capture_detail::MethodName(settings.left_method), right = capture_detail::MethodName(settings.right_method);
+	const auto left = VkNRCState::MethodName(settings.left_method), right = VkNRCState::MethodName(settings.right_method);
 	constexpr auto int_max = std::numeric_limits<int32_t>::max();
 	if (left.empty() || right.empty() || settings.max_bounces > int_max) {
 		output.setstate(std::ios::failbit);

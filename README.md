@@ -267,6 +267,18 @@ cmake --build build --config Release --target VkNRCRollingTest --parallel 8
 .\build\Release\VkNRCRollingTest.exe .\build\rolling-validation --validation
 ```
 
+## Timed benchmark
+
+In the **Performance** panel, set **Duration (seconds)** to 1–120 seconds (default 5), then select **Start benchmark**. Resizing the window cancels the run. To measure plain path tracing, choose **None** for both halves and enable **Lock** in the **NRC** panel to stop training.
+
+From PowerShell, this runs the default Cornell Box at 1280×720 with NRC on both halves, prints the result, and exits:
+
+```powershell
+.\build\Release\VkNRC.exe --benchmark 5
+```
+
+The benchmark submits 32 warm-up frames and waits for the GPU to finish before starting the timer. It waits for the final measured frame to finish, then divides elapsed wall time by the number of rendered frames to report average frame time. This measures whole-application throughput, including frame pacing and training when enabled.
+
 ## Repeatable radiance comparison
 
 The diagnostic mode trains with the same NRC/plain-PT split as the interactive

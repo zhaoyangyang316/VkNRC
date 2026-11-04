@@ -15,10 +15,19 @@
 #include <myvk/ImageView.hpp>
 #include <random>
 #include <span>
+#include <string_view>
 
 class VkNRCState final : public myvk::DeviceObjectBase {
 public:
 	enum Method { kNone, kNRC, kCache };
+	static constexpr std::string_view MethodName(Method method) {
+		switch (method) {
+		case kNone: return "PT";
+		case kNRC: return "NRC";
+		case kCache: return "Cache";
+		}
+		return {};
+	}
 
 private:
 	inline static constexpr float kDefaultTrainProbability = 0.03f;

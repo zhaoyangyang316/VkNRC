@@ -10,15 +10,6 @@
 #include <vector>
 
 namespace capture_detail {
-inline std::string_view MethodName(VkNRCState::Method method) {
-	switch (method) {
-	case VkNRCState::kNone: return "PT";
-	case VkNRCState::kNRC: return "NRC";
-	case VkNRCState::kCache: return "Cache";
-	}
-	return {};
-}
-
 struct Line {
 	std::vector<const ImFontGlyph *> glyphs;
 	int width{};
@@ -86,7 +77,7 @@ struct Caption {
 
 inline bool MakeCaption(Caption &caption, VkExtent3D extent, const CaptureMetadata &metadata) {
 	const auto &settings = metadata.settings;
-	const auto left = MethodName(settings.left_method), right = MethodName(settings.right_method);
+	const auto left = VkNRCState::MethodName(settings.left_method), right = VkNRCState::MethodName(settings.right_method);
 	if (left.empty() || right.empty())
 		return false;
 
