@@ -373,8 +373,11 @@ PathTraceResult TracePath(Hit hit, Ray ray, in const uint method, in const bool 
 		if (vertex + 1 == max_bounces)
 			break;
 
-		// Compare the material's roughness, before BRDF numerical regularization.
-		bool rough_hit = hit.material.roughness > uMinRoughness;
+		// Treat weak specular reflection as diffuse for the cache decision:
+		// every resolved linear RGB channel (including map_Ks) must be below 0.01.
+		// This changes cache termination only, for both rendering and training.
+		float termination_roughness = all(lessThan(hit.specular, vec3(0.01))) ? 1.0 : hit.material.roughness;
+		bool rough_hit = termination_roughness > uMinRoughness;
 		// S_0 contains primary direct lighting. Trace the first scatter explicitly
 		// (including its MIS-weighted light hit or escape) in both NRC views.
 		// At a secondary hit, emission was handled above and S_i contributes only GI.

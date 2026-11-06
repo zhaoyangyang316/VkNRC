@@ -2,7 +2,7 @@
 """Sequential GPU regression for --indirect-only; Python 3 standard library only.
 
 Run after building Release: python test/indirect_illumination.py --validation
-For the fast-mode primary/secondary regression add --fast-gi (one warmup frame).
+For the fast-mode primary/secondary regression add --fast-gi (640x360, one warmup frame).
 Each renderer launch is bounded; captures and combined stdout/stderr remain in --out.
 """
 import argparse
@@ -12,6 +12,7 @@ import math
 import os
 from pathlib import Path
 import re
+import struct
 import subprocess
 import sys
 
@@ -56,21 +57,49 @@ def fixtures(directory):
     return result
 
 
+def write_solid_tga(path, rgb):
+    # One true-color, uncompressed pixel. TGA stores BGR; no image library needed.
+    header = struct.pack("<BBBHHBHHHHBB", 0, 0, 2, 0, 0, 0, 0, 0, 1, 1, 24, 0x20)
+    path.write_bytes(header + bytes(reversed(rgb)))
+
+
 def secondary_fixtures(directory):
     # The camera looks along -Z from between two facing quads. At a depth of 3,
     # only the back quad can supply cached indirect light: the primary must be
     # traced and the third hit has already reached the depth limit.
     meshes = {}
-    for name, roughness in (("smooth", .25), ("equal", .5), ("rough", .75)):
+    write_solid_tga(directory / "specular-black.tga", (0, 0, 0))
+    # A single channel at or above .01 must retain the material roughness.
+    write_solid_tga(directory / "specular-red.tga", (128, 0, 0))
+    # 24/255 in sRGB becomes approximately .00913 in linear space. Testing the
+    # encoded texel rather than the sampled linear value would reject this map.
+    write_solid_tga(directory / "specular-weak.tga", (24, 24, 24))
+    cases = (
+        ("smooth", .25, ".2 .2 .2", None),
+        ("equal", .5, ".2 .2 .2", None),
+        ("rough", .75, ".2 .2 .2", None),
+        ("diffuse", .05, "0 0 0", None),
+        ("weak-specular", .05, ".009 .009 .009", None),
+        ("specular-equal", .05, ".01 0 0", None),
+        ("specular-above", .05, ".0101 0 0", None),
+        ("mapped-diffuse", .05, ".2 .2 .2", "specular-black.tga"),
+        ("mapped-weak-specular", .05, ".2 .2 .2", "specular-weak.tga"),
+        ("mapped-specular", .05, "0 0 0", "specular-red.tga"),
+    )
+    for name, roughness, specular, texture in cases:
         path = directory / f"secondary-{name}.obj"
         path.write_text(f"mtllib {path.stem}.mtl\n"
                         "v -1 -1 -.25\nv 1 -1 -.25\nv 1 1 -.25\nv -1 1 -.25\n"
                         "v -1 -1 .25\nv 1 -1 .25\nv 1 1 .25\nv -1 1 .25\nvt 0 0\n"
                         "usemtl primary\nf 1/1 2/1 3/1\nf 1/1 3/1 4/1\n"
                         "usemtl secondary\nf 5/1 8/1 7/1\nf 5/1 7/1 6/1\n", encoding="ascii")
-        path.with_suffix(".mtl").write_text("".join(
-            f"newmtl {material}\nKd .7 .7 .7\nKs 0 0 0\nKe 0 0 0\nNi 1.5\nPr {r}\n"
-            for material, r in (("primary", 1), ("secondary", roughness))), encoding="ascii")
+        material_text = (
+            "newmtl primary\nKd .7 .7 .7\nKs 0 0 0\nKe 0 0 0\nNi 1.5\nPr 1\n"
+            f"newmtl secondary\nKd .7 .7 .7\nKs {specular}\nKe 0 0 0\nNi 1.5\nPr {roughness}\n")
+        if texture:
+            # The loaded map replaces Ks, including an all-black map.
+            material_text += f"map_Ks {texture}\n"
+        path.with_suffix(".mtl").write_text(material_text, encoding="ascii")
         meshes[path.stem] = path
     return meshes
 
@@ -114,7 +143,7 @@ def main():
         command = [str(args.exe), str(scenes[scene]), "--compare", str(output), "--warmup", "1" if args.fast_gi else "64",
                    "--samples", str(args.samples), "--seed", "1337", "--max-bounces", str(depth)]
         if args.fast_gi:
-            command += ["--fast-mode", "--min-roughness", str(threshold)]
+            command += ["--fast-mode", "--min-roughness", str(threshold), "--resolution", "640x360"]
         if scene.startswith("secondary-"):
             command += ["--camera", "0", "0", "0", "--fov", "60"]
         elif scene != "cornell":
@@ -188,15 +217,26 @@ def main():
                 for indirect in (False, True):
                     explicit(capture("cornell", 64, indirect, nee, 1), "Cornell upper roughness cutoff")
 
-        for scene in ("secondary-smooth", "secondary-equal", "secondary-rough"):
+        diffuse_like_scenes = ("secondary-diffuse", "secondary-weak-specular",
+                               "secondary-mapped-diffuse", "secondary-mapped-weak-specular")
+        for scene in ("secondary-smooth", "secondary-equal", "secondary-rough",
+                      *diffuse_like_scenes, "secondary-specular-equal", "secondary-specular-above",
+                      "secondary-mapped-specular"):
             for indirect in (False, True):
                 image = capture(scene, 3, indirect, True)
                 require(sum(image["pt"]) / len(image["pt"]) > .01, f"{scene}: insufficient illumination")
-                if scene == "secondary-rough":
+                if scene == "secondary-rough" or scene in diffuse_like_scenes:
                     cached(image, scene)
                 else:
                     explicit(image, scene)
-        print(f"PASS: {len(results)} fast GI captures; primary light, strict secondary cutoff and depth constraints passed.")
+                if scene in diffuse_like_scenes:
+                    # Effective roughness 1 still fails a strictly-greater-than
+                    # cutoff of 1. This must not change baseline path tracing.
+                    cutoff = capture(scene, 3, indirect, True, 1)
+                    explicit(cutoff, f"{scene}: effective upper roughness cutoff")
+                    require(image["pt"] == cutoff["pt"], f"{scene}: threshold changed baseline PT")
+        print(f"PASS: {len(results)} fast GI captures; primary light, strict secondary cutoff, "
+              "strict specular cutoff, linear texture handling and depth constraints passed.")
         print(f"Logs, fixtures, PFM images, and statistics: {args.out}")
         return
 

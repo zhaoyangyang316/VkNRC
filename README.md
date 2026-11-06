@@ -196,7 +196,14 @@ Controls:
   threshold. NRC traces the first bounce explicitly, so direct lighting at the
   camera-visible surface comes from the path tracer. The first secondary hit
   with `roughness > Min roughness` can query the cache for indirect lighting.
-  Smoother hits and hits exactly at the threshold continue tracing. **Indirect
+  Surfaces whose resolved specular RGB channels are **all below 0.01** use
+  **roughness 1** for this decision, in both rendering and training. This uses
+  linear RGB values, including any specular texture.
+  This lets diffuse walls, carpets and cushions qualify even if their source
+  material has a low roughness value. BRDF evaluation and neural input material
+  values are unchanged. Surfaces with any specular component at or above 0.01 use their
+  stored roughness. Smoother hits and hits exactly at the threshold continue
+  tracing; a threshold of 1 therefore disables these fast-mode queries. **Indirect
   illumination only** uses this same rule and omits the primary direct terms.
   The explicit depth limit still applies. **Cache** is a separate debug view
   that can visualize the network prediction at the primary hit.

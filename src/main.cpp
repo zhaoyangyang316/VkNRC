@@ -81,6 +81,7 @@ int main(int argc, char **argv) {
 		spdlog::info("Next event estimation is enabled by default; --no-nee disables it for comparison.");
 		spdlog::info("--fast-mode lets NRC query indirect lighting at secondary hits with roughness strictly above --min-roughness "
 		             "(default {:.1f}). Fast mode is off by default.", VkNRCState::GetDefaultMinRoughness());
+		spdlog::info("For fast-mode cache decisions, surfaces with every specular RGB channel below 0.01 use roughness 1.");
 		spdlog::info("--indirect-only excludes visible emission/background and primary direct lighting for both NRC "
 		             "and path tracing; disabled by default.");
 	};
@@ -481,7 +482,8 @@ int main(int argc, char **argv) {
 				                                                  "%.3f", ImGuiSliderFlags_AlwaysClamp);
 				if (ImGui::IsItemHovered())
 					ImGui::SetTooltip("NRC traces primary direct lighting and caches GI at secondary hits\n"
-					                  "where roughness > Min roughness, including in indirect-only mode.");
+					                  "where roughness > Min roughness, including in indirect-only mode.\n"
+					                  "Surfaces with every specular RGB channel below 0.01 use roughness 1.");
 				if (mode_changed || roughness_changed) {
 					if (vk_nrc_state->SetFastMode(fast_mode, min_roughness)) {
 						frame_manager->WaitIdle();
