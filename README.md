@@ -66,7 +66,7 @@ To use another scene, pass an OBJ path:
 
 The **Scene** dropdown lists OBJ files recursively under `assets`, plus a custom
 scene supplied on the command line. The bundled scenes are **Cornell Box**,
-**Living Room**, and **Veach Door**, each with a camera preset. Place additional
+**Crytek Sponza**, **Living Room**, and **Veach Door**, each with a camera preset. Place additional
 OBJ/MTL files and their textures under `assets` before starting to add them to
 the list. Selecting a scene resets its camera, network and
 accumulation, unlocks training, and resumes rendering. A failed load keeps the
@@ -123,13 +123,47 @@ meshes, original area emitter, textures and camera were converted to OBJ/MTL;
 Python 3's standard library. See [conversion details](assets/veach-door/ATTRIBUTION.txt)
 and [input hashes and light audit](assets/veach-door/import-report.json).
 
-Both are adaptations to VkNRC's current surface model: it uses flat triangle
+**Crytek Sponza** is Frank Meinl/Crytek's 2010 Sponza Atrium from the
+[McGuire Computer Graphics Archive](https://casual-effects.com/data/), licensed
+CC BY 3.0. Geometry and PNG textures are preserved from the archive. Texture
+path separators are normalized and the MTL adds explicit Beckmann roughness
+using `Pr = sqrt(2 / (Ns + 2))`. A camera preset looks down the ground-floor
+atrium. Select **Crytek Sponza** in the Scene dropdown after restarting the demo,
+or launch it directly:
+
+```powershell
+.\run-demo.cmd assets/crytek-sponza/sponza.obj
+```
+
+The source contains **no emissive geometry**. Sponza uses the renderer's white
+environment at intensity **10**, which is also sampled by NEE; no area light or
+sun has been added. The original texture alpha masks and bump maps are retained,
+but VkNRC currently renders the foliage and chain cards as opaque surfaces and
+does not apply bump mapping. See [attribution and adaptations](assets/crytek-sponza/ATTRIBUTION.txt)
+and the [import audit](assets/crytek-sponza/import-report.json).
+To reproduce the import, download the approximately 78 MB
+[source ZIP](https://casual-effects.com/g3d/data10/common/model/crytek_sponza/sponza.zip)
+and run the standard-library-only Python 3.11+ importer. It verifies the archive's
+SHA-256 before extracting:
+
+```powershell
+python scripts/import-crytek-sponza.py --archive C:\path\to\sponza.zip
+```
+
+Verified on 2026-11-06 with the desktop Release build and RTX 5090: 1,024 training
+frames followed by 256 samples per method at 1280x720 with 16 max bounces and NEE
+enabled. NRC and path-tracing captures contained finite radiance, all renderer-used
+textures loaded, and no Vulkan validation errors were reported. The source MTL
+has redundant `d`/`Tr` declarations; tinyobj warns and uses `d`, with no visual effect
+in the current opaque renderer. This is a loading/rendering check, not a convergence test.
+
+These scenes are adaptations to VkNRC's current surface model: it uses flat triangle
 normals and opaque materials, with Beckmann specular reflection and two-sided
 mesh emission. Living Room's lampshade is opaque; Veach Door's glass teapot has
 reflection but no transmission or refraction, and conductor/GGX materials are
 approximated. These limitations affect agreement with the source renders.
-The imported camera/catalog checks and Release build passed locally. Both scenes
-also completed 1,024 training frames followed by 512 samples per method at
+The imported camera/catalog checks and Release build passed locally. Living Room
+and Veach Door also completed 1,024 training frames followed by 512 samples per method at
 1280x720, with finite NRC/path-tracing captures and no reported Vulkan validation
 errors. This checks successful loading and rendering, not convergence or agreement
 with the paper.

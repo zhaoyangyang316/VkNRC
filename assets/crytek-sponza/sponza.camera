@@ -1,0 +1,7 @@
+# VkNRC camera preset; authored for the central atrium, Y up.
+# Raw OBJ position 1000 180 0, target -1000 220 0.
+# Normalized as (raw position - AABB center) * (2 / max(AABB extent)).
+name Crytek Sponza
+position 0.570040587457 -0.253433942853 0.0207965966953
+target -0.504981437057 -0.231933502363 0.0207965966953
+fov 60

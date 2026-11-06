@@ -1,0 +1,770 @@
+{
+  "source_url": "https://casual-effects.com/g3d/data10/common/model/crytek_sponza/sponza.zip",
+  "source_archive_sha256": "da005cbee0be2df2abc8513f3ceb61bcb6f69aac112babcd9c00169a27c2770c",
+  "source_files_sha256": {
+    "sponza.obj": "dc9d77fa783772e92f47e67ddef8344858fa14e224711b5dd7d39f7db7042493",
+    "sponza.mtl": "7e5d765a00bf2af1c0cae1696051fdf04c5bb358cf2bc5cc2634ea8715669d9b",
+    "copyright.txt": "59967ef952128e385570c651d966871776c296a6a6a057487690d55ac11b70f6"
+  },
+  "adapted_mtl_sha256": "3e860b123e553eab00e4a4f765c4a0306592be7fab74045d04f98d01b7511bea",
+  "geometry": {
+    "positions": 153635,
+    "texcoords": 91964,
+    "normals": 147510,
+    "polygons": 135394,
+    "triangle_faces": 8521,
+    "quad_faces": 126873,
+    "triangles_after_triangulation": 262267,
+    "all_face_indices_valid": true,
+    "all_faces_have_uvs_normals_and_materials": true,
+    "bounds_min": [
+      -1920.9459,
+      -126.4425,
+      -1182.8071
+    ],
+    "bounds_max": [
+      1799.9081,
+      1429.4332,
+      1105.426
+    ],
+    "normalization_center": [
+      -60.51889999999992,
+      651.4953499999999,
+      -38.69055000000003
+    ],
+    "normalization_scale": 0.0005375110122568636,
+    "triangles_by_material": {
+      "Material__25": 3042,
+      "Material__298": 4086,
+      "Material__47": 18,
+      "Material__57": 3472,
+      "arch": 10168,
+      "bricks": 796,
+      "ceiling": 5876,
+      "chain": 32,
+      "column_a": 2816,
+      "column_b": 23208,
+      "column_c": 7088,
+      "details": 880,
+      "fabric_a": 11008,
+      "fabric_c": 18944,
+      "fabric_d": 16512,
+      "fabric_e": 16512,
+      "fabric_f": 14336,
+      "fabric_g": 14336,
+      "flagpole": 16496,
+      "floor": 21,
+      "leaf": 31436,
+      "roof": 14484,
+      "vase": 9184,
+      "vase_hanging": 19828,
+      "vase_round": 17688
+    }
+  },
+  "camera": {
+    "raw_position": [
+      1000.0,
+      180.0,
+      0.0
+    ],
+    "raw_target": [
+      -1000.0,
+      220.0,
+      0.0
+    ],
+    "normalized_position": [
+      0.5700405874565355,
+      -0.2534339428529041,
+      0.020796596695274807
+    ],
+    "normalized_target": [
+      -0.5049814370571917,
+      -0.23193350236262958,
+      0.020796596695274807
+    ],
+    "vertical_fov_degrees": 60
+  },
+  "lighting": {
+    "assigned_emissive_materials": [],
+    "emissive_triangles": 0,
+    "added_lights": 0,
+    "environment_intensity": 10,
+    "note": "Original materials have no Ke or map_Ke emission. VkNRC uses its existing constant environment."
+  },
+  "materials": {
+    "leaf": {
+      "Ns": 10.0,
+      "Pr": 0.408248290463863,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ka": "textures/sponza_thorn_diff.png",
+        "map_Kd": "textures/sponza_thorn_diff.png",
+        "map_d": "textures/sponza_thorn_mask.png",
+        "map_bump": "textures/sponza_thorn_bump.png"
+      }
+    },
+    "vase_round": {
+      "Ns": 10.0,
+      "Pr": 0.408248290463863,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ka": "textures/vase_round.png",
+        "map_Kd": "textures/vase_round.png",
+        "map_bump": "textures/vase_round_bump.png"
+      }
+    },
+    "Material__57": {
+      "Ns": 10.0,
+      "Pr": 0.408248290463863,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ka": "textures/vase_plant.png",
+        "map_Kd": "textures/vase_plant.png",
+        "map_d": "textures/vase_plant_mask.png"
+      }
+    },
+    "Material__298": {
+      "Ns": 10.0,
+      "Pr": 0.408248290463863,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ka": "textures/background.png",
+        "map_Kd": "textures/background.png",
+        "map_bump": "textures/background_bump.png"
+      }
+    },
+    "bricks": {
+      "Ns": 10.0,
+      "Pr": 0.408248290463863,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ks": "textures/spnza_bricks_a_spec.png",
+        "map_Ka": "textures/spnza_bricks_a_diff.png",
+        "map_Kd": "textures/spnza_bricks_a_diff.png",
+        "map_bump": "textures/spnza_bricks_a_bump.png"
+      }
+    },
+    "arch": {
+      "Ns": 40.0,
+      "Pr": 0.21821789023599236,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ka": "textures/sponza_arch_diff.png",
+        "map_Kd": "textures/sponza_arch_diff.png"
+      }
+    },
+    "ceiling": {
+      "Ns": 10.0,
+      "Pr": 0.408248290463863,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ka": "textures/sponza_ceiling_a_diff.png",
+        "map_Kd": "textures/sponza_ceiling_a_diff.png"
+      }
+    },
+    "column_a": {
+      "Ns": 10.0,
+      "Pr": 0.408248290463863,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ka": "textures/sponza_column_a_diff.png",
+        "map_Kd": "textures/sponza_column_a_diff.png",
+        "map_bump": "textures/sponza_column_a_bump.png"
+      }
+    },
+    "floor": {
+      "Ns": 70.0,
+      "Pr": 0.16666666666666666,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ka": "textures/sponza_floor_a_diff.png",
+        "map_Kd": "textures/sponza_floor_a_diff.png",
+        "map_Ks": "textures/floor_gloss.png"
+      }
+    },
+    "column_c": {
+      "Ns": 10.0,
+      "Pr": 0.408248290463863,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ka": "textures/sponza_column_c_diff.png",
+        "map_Kd": "textures/sponza_column_c_diff.png",
+        "map_bump": "textures/sponza_column_c_bump.png"
+      }
+    },
+    "details": {
+      "Ns": 10.0,
+      "Pr": 0.408248290463863,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ka": "textures/sponza_details_diff.png",
+        "map_Kd": "textures/sponza_details_diff.png"
+      }
+    },
+    "column_b": {
+      "Ns": 10.0,
+      "Pr": 0.408248290463863,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ka": "textures/sponza_column_b_diff.png",
+        "map_Kd": "textures/sponza_column_b_diff.png",
+        "map_bump": "textures/sponza_column_b_bump.png"
+      }
+    },
+    "Material__47": {
+      "Ns": 10.0,
+      "Pr": 0.408248290463863,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {}
+    },
+    "flagpole": {
+      "Ns": 10.0,
+      "Pr": 0.408248290463863,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ka": "textures/sponza_flagpole_diff.png",
+        "map_Kd": "textures/sponza_flagpole_diff.png"
+      }
+    },
+    "fabric_e": {
+      "Ns": 0.1,
+      "Pr": 0.9759000729485332,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ka": "textures/sponza_fabric_green_diff.png",
+        "map_Kd": "textures/sponza_fabric_green_diff.png"
+      }
+    },
+    "fabric_d": {
+      "Ns": 0.1,
+      "Pr": 0.9759000729485332,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ka": "textures/sponza_fabric_blue_diff.png",
+        "map_Kd": "textures/sponza_fabric_blue_diff.png"
+      }
+    },
+    "fabric_a": {
+      "Ns": 0.1,
+      "Pr": 0.9759000729485332,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ka": "textures/sponza_fabric_diff.png",
+        "map_Kd": "textures/sponza_fabric_diff.png"
+      }
+    },
+    "fabric_g": {
+      "Ns": 0.1,
+      "Pr": 0.9759000729485332,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ka": "textures/sponza_curtain_blue_diff.png",
+        "map_Kd": "textures/sponza_curtain_blue_diff.png"
+      }
+    },
+    "fabric_c": {
+      "Ns": 0.1,
+      "Pr": 0.9759000729485332,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ka": "textures/sponza_curtain_diff.png",
+        "map_Kd": "textures/sponza_curtain_diff.png"
+      }
+    },
+    "fabric_f": {
+      "Ns": 0.1,
+      "Pr": 0.9759000729485332,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ka": "textures/sponza_curtain_green_diff.png",
+        "map_Kd": "textures/sponza_curtain_green_diff.png"
+      }
+    },
+    "chain": {
+      "Ns": 50.0,
+      "Pr": 0.19611613513818404,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ka": "textures/chain_texture.png",
+        "map_Kd": "textures/chain_texture.png",
+        "map_d": "textures/chain_texture_mask.png",
+        "map_bump": "textures/chain_texture_bump.png"
+      }
+    },
+    "vase_hanging": {
+      "Ns": 50.0,
+      "Pr": 0.19611613513818404,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ka": "textures/vase_hanging.png",
+        "map_Kd": "textures/vase_hanging.png",
+        "map_Ks": "textures/vase_hanging.png"
+      }
+    },
+    "vase": {
+      "Ns": 10.0,
+      "Pr": 0.408248290463863,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ka": "textures/vase_dif.png",
+        "map_Kd": "textures/vase_dif.png",
+        "map_bump": "textures/vase_bump.png"
+      }
+    },
+    "Material__25": {
+      "Ns": 10.0,
+      "Pr": 0.408248290463863,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ka": "textures/lion.png",
+        "map_Kd": "textures/lion.png",
+        "map_bump": "textures/lion_bump.png"
+      }
+    },
+    "roof": {
+      "Ns": 10.0,
+      "Pr": 0.408248290463863,
+      "Ke": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textures": {
+        "map_Ka": "textures/sponza_roof_diff.png",
+        "map_Kd": "textures/sponza_roof_diff.png"
+      }
+    }
+  },
+  "textures": {
+    "textures/background.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 1279899,
+      "sha256": "21f5955648b003a0046ca16054aef2db07901d73662e8b8141e73ba551e06f87"
+    },
+    "textures/background_bump.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 211001,
+      "sha256": "c816df0108455787a9ffba973b01788d3cd2724dbfe1ff148dd1a51df37b2baa"
+    },
+    "textures/chain_texture.png": {
+      "width": 256,
+      "height": 1024,
+      "bytes": 374829,
+      "sha256": "5745cf634538333bcad860e5da4bd57d288166631aadc4b0268fc2103b152242"
+    },
+    "textures/chain_texture_bump.png": {
+      "width": 256,
+      "height": 1024,
+      "bytes": 37014,
+      "sha256": "2bcb283948533a96100cb90f1bffa4edb609c887b336ba21be12ec713430933e"
+    },
+    "textures/chain_texture_mask.png": {
+      "width": 256,
+      "height": 1024,
+      "bytes": 1150,
+      "sha256": "43c246a2de3b9bea28add7b188324765443e30223fcee13061719e2d357194e1"
+    },
+    "textures/floor_gloss.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 1419271,
+      "sha256": "de0f989550e4cf7e0753c7480cd2b533ecb9d61b395033fbc3dbe71140aebaf2"
+    },
+    "textures/lion.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 1685074,
+      "sha256": "13c763cb8d01e781121180a2f0c7ddc6c672d0a146ffc1359a5795dba99db5c2"
+    },
+    "textures/lion_bump.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 283932,
+      "sha256": "8c9c6c4e42a9160f518f27af3755e8b45e0342882e422d3c6ecb397efcdc8acd"
+    },
+    "textures/lion2_bump.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 287706,
+      "sha256": "fcca6af06b7c7ca9b5ef0829db9ad7f2437ddaa2d6484d3811ad9a8b21a81ea3"
+    },
+    "textures/spnza_bricks_a_bump.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 613084,
+      "sha256": "5ce6e00a0d90f377b8f922f006b8078d72272259b1816e24d511302c0822dfd8"
+    },
+    "textures/spnza_bricks_a_diff.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 1850821,
+      "sha256": "6653d814e78df5b1d72bff0bc4f055b19f40c60125368c66f706862a77b11e19"
+    },
+    "textures/spnza_bricks_a_spec.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 789292,
+      "sha256": "07e6c0d154316dca9f06ac8f30e155786d1b4c9f4f75a5f57901f96338d452f7"
+    },
+    "textures/sponza_arch_bump.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 72484,
+      "sha256": "7ed13ea591ff9d0c4e950a372e59de8e95dd58af9d0f1fcc5794b87927e8d9ab"
+    },
+    "textures/sponza_arch_diff.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 1545689,
+      "sha256": "1a2e127ce784d2d4f061eae58a780cdcc8daba6c0f254d06e5494e41d4874ff2"
+    },
+    "textures/sponza_arch_spec.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 519758,
+      "sha256": "cff3751f78b5d8c59eb599477187c7ff2874a76140f442ed52a45e7def08e412"
+    },
+    "textures/sponza_ceiling_a_diff.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 1748205,
+      "sha256": "6d6ff12242bd2b0680c45b27d0234cb4fc636959a2575f29dd6eb02251348f4c"
+    },
+    "textures/sponza_ceiling_a_spec.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 611209,
+      "sha256": "2d8ae36a72774c51128a2810035377b08c7214b9fa1db6d0d4d2229162339828"
+    },
+    "textures/sponza_column_a_bump.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 314193,
+      "sha256": "d88c0f98ac0d37a6c0759962bb797c3f1e9dbf976035308cde4cba92a1156b40"
+    },
+    "textures/sponza_column_a_diff.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 1743092,
+      "sha256": "13c3511250c790ad260845ffd5d56f4622bb3760316831403c3cc182bcf40095"
+    },
+    "textures/sponza_column_a_spec.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 624131,
+      "sha256": "66f596b9e37fdaf84b581bb671c40942d59f0dda3470f743b8cbe7928cbc4cab"
+    },
+    "textures/sponza_column_b_bump.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 306062,
+      "sha256": "a5f818c01f960fc43258e5be57c77b717209078a50758d43c6c61b89253c0395"
+    },
+    "textures/sponza_column_b_diff.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 2127842,
+      "sha256": "e893c9f0a8ca1cb7b649476eaa6ce98ece4d82b447f2a9858dbf0be4ce05c8e1"
+    },
+    "textures/sponza_column_b_spec.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 625709,
+      "sha256": "6850e2de861b79d48722fd286f3726755d8d5f5f7c459e0600bc9f9f03c6f5fe"
+    },
+    "textures/sponza_column_c_bump.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 322713,
+      "sha256": "25badc8f4f8ecb7f982265534d60fd0f0da961ee4f64abfafa8b31ec07534e27"
+    },
+    "textures/sponza_column_c_diff.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 2021589,
+      "sha256": "eaf9050e0cb05bc5184b4fc7108085036e049ca6a3a93c0b11ed8e920831472d"
+    },
+    "textures/sponza_column_c_spec.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 662176,
+      "sha256": "77641f66babf57ef10d36d4f4357d39b38c510779f87a3e63c0d797c40c425b7"
+    },
+    "textures/sponza_curtain_blue_diff.png": {
+      "width": 2048,
+      "height": 2048,
+      "bytes": 9202020,
+      "sha256": "267f19cc7b95d665965f49117e6ef5cabc62ae65b5c921ca86c5f53ab5f55f97"
+    },
+    "textures/sponza_curtain_diff.png": {
+      "width": 2048,
+      "height": 2048,
+      "bytes": 8834304,
+      "sha256": "dbe47dc0d50b3b5917d94f92c667a1068de776cf1b1af9f931358671a8e8a677"
+    },
+    "textures/sponza_curtain_green_diff.png": {
+      "width": 2048,
+      "height": 2048,
+      "bytes": 8325274,
+      "sha256": "2a1141c908bbbcc66064ef0cd1888d26e4493560ca1a8add94ba96e4413ef0b5"
+    },
+    "textures/sponza_details_diff.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 1342967,
+      "sha256": "01012e0e81c20b10856dd34476069aadf1270cedd47e13b2760ae7dec341a7ab"
+    },
+    "textures/sponza_details_spec.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 618549,
+      "sha256": "405eb35e24f254a9ff4de6f8021f847e92af5d95ad91dfd5c88c239c0bbfeec0"
+    },
+    "textures/sponza_fabric_blue_diff.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 2097497,
+      "sha256": "b7398d4f96ac101b92a42f8e093754fa239bb80e0038727e49574abed5473c20"
+    },
+    "textures/sponza_fabric_diff.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 2208126,
+      "sha256": "1fe1ee45005ddcbcde414096c1018c9296e5dfed528ecc99f9ce7d82862fd963"
+    },
+    "textures/sponza_fabric_green_diff.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 2162350,
+      "sha256": "eb009dd943c52da29e3d7dd4d30e12a912769ffc7659e97dba7a2483fa79c6c3"
+    },
+    "textures/sponza_fabric_purple.png": {
+      "width": 2048,
+      "height": 2048,
+      "bytes": 1104562,
+      "sha256": "1de10bfe0c410f33e3a54aa4987bf7e7c209b3f00190779d1ce73001261bb294"
+    },
+    "textures/sponza_fabric_spec.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 462762,
+      "sha256": "f44c12f0749297ec5cfa73a6d867b8771cb366eb47233ff989c15f674e3573a0"
+    },
+    "textures/sponza_flagpole_diff.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 1314735,
+      "sha256": "c65b8651f12a05063118a91bd2c1ebb37a403936bb2b79226cf842917ebfbcbe"
+    },
+    "textures/sponza_flagpole_spec.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 597329,
+      "sha256": "e19367ea4099b185b86e9cbf932b54d2c7ec24ec4d7ed281adf8467d9be85af2"
+    },
+    "textures/sponza_floor_a_diff.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 1881715,
+      "sha256": "ec677f8d95abc307a7551a501ed20c9cd79bbc38d41963a7d74a35d096d2f1c4"
+    },
+    "textures/sponza_floor_a_spec.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 730796,
+      "sha256": "1a46518c046ccb196bb25bc72c89546dca8625fc278de6a34256789e84d3cfdc"
+    },
+    "textures/sponza_roof_diff.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 2280888,
+      "sha256": "be5c0e86671a709c5d2f87820f92414bf4c069c5041d2fb548f8bf130f7616dd"
+    },
+    "textures/sponza_thorn_bump.png": {
+      "width": 256,
+      "height": 256,
+      "bytes": 35900,
+      "sha256": "fddd9ab74a4ca2b63feba790102407aaeb1c3c675595f8836e9b97b783f7019c"
+    },
+    "textures/sponza_thorn_diff.png": {
+      "width": 512,
+      "height": 512,
+      "bytes": 450994,
+      "sha256": "fbe4564dcfbba7f225f6df00caa92365cf653d6bf496bb3da59b164fa1c84aac"
+    },
+    "textures/sponza_thorn_mask.png": {
+      "width": 512,
+      "height": 512,
+      "bytes": 68251,
+      "sha256": "57f195177f3ff443e43eb7590859feb4c89164107ea69d6f26ee0a1deefa5c7b"
+    },
+    "textures/sponza_thorn_spec.png": {
+      "width": 512,
+      "height": 512,
+      "bytes": 360991,
+      "sha256": "1576e5befee26cebb25be28626980e34d4cfd306968772b1359a8713c7d5cebc"
+    },
+    "textures/vase_bump.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 431658,
+      "sha256": "e93b7ae479ffee85ea789c75cd4d12e96c813db73d914d13d3403ca379c0eb1f"
+    },
+    "textures/vase_dif.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 1739865,
+      "sha256": "141d957726bb80708e3210d481c82d4038016cc31e414c541eea76d61e600bd5"
+    },
+    "textures/vase_hanging.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 1240906,
+      "sha256": "310b171c5508c7f1df97cc87ebb2139141f4fbf6cd65d6cf1675e92ed64521b6"
+    },
+    "textures/vase_plant.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 817124,
+      "sha256": "2e3e7cdcc544beec19338b7e3f33e7814847b1e73294f4bae4c18d3740a7b1e1"
+    },
+    "textures/vase_plant_mask.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 85746,
+      "sha256": "1d179d56d0750c9e64200bdc17b65c11ff8bda6a593f4d1453df05ade1a70927"
+    },
+    "textures/vase_plant_spec.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 716987,
+      "sha256": "b2332e35c817e17fe0185a6c246ac68bd38ad73c33372b86a887362a2e485402"
+    },
+    "textures/vase_round.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 1798469,
+      "sha256": "5ee2138dc016aff582e50c2725b7749cdf0681537147d3cd9034e0d10414fb7c"
+    },
+    "textures/vase_round_bump.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 77501,
+      "sha256": "0bf21985bf48a5392f7faba4e043b77582512cd88866c9b1cff4ec0939c19b1f"
+    },
+    "textures/vase_round_spec.png": {
+      "width": 1024,
+      "height": 1024,
+      "bytes": 1697907,
+      "sha256": "dfe9e52cae7cf1fe654ca7088916e29405bde0150812ac419f0da74467c4db0a"
+    }
+  },
+  "texture_checks": {
+    "all_referenced_textures_present": true,
+    "unique_referenced_textures": 39,
+    "all_54_source_pngs_preserved": true
+  },
+  "limitations": [
+    "Opaque alpha and map_d masks",
+    "Bump maps and OBJ vertex normals ignored",
+    "Phong-to-Beckmann roughness approximation"
+  ]
+}

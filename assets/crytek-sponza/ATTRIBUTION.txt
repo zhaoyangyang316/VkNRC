@@ -1,0 +1,47 @@
+Crytek Sponza
+Copyright (c) 2010 Frank Meinl, Crytek.
+
+Licensed under Creative Commons Attribution 3.0 Unported (CC BY 3.0),
+as listed in Morgan McGuire's Computer Graphics Archive:
+https://creativecommons.org/licenses/by/3.0/
+https://creativecommons.org/licenses/by/3.0/legalcode
+
+Archive: https://casual-effects.com/data/
+Model metadata: https://casual-effects.com/g3d/data10/common/model/crytek_sponza/info.js
+Download: https://casual-effects.com/g3d/data10/common/model/crytek_sponza/sponza.zip
+Source ZIP SHA-256: da005cbee0be2df2abc8513f3ceb61bcb6f69aac112babcd9c00169a27c2770c
+
+Frank Meinl at Crytek remodeled the Sponza Palace atrium, inspired by Marko
+Dabrovic's original model. Morgan McGuire prepared this OBJ/PNG archive,
+including material corrections, bump maps derived from normal maps, and
+cleaned opacity masks stored in diffuse alpha. See copyright.txt for the
+unmodified original notice and archive history.
+
+Archive citation: Morgan McGuire, Computer Graphics Archive, July 2017,
+https://casual-effects.com/data
+
+VkNRC adaptations:
+- The OBJ, all 54 PNG textures, and copyright.txt are unchanged from the ZIP.
+- MTL texture path separators are changed from backslashes to forward slashes.
+- Each material gains explicit Beckmann roughness Pr = sqrt(2 / (Ns + 2)).
+  This approximates its Phong exponent for VkNRC; it is not an exact BSDF match.
+- A normalized camera preset is added for the central atrium.
+- No light geometry or emission is added. All 25 source materials have Ke 0
+  and no map_Ke. VkNRC's existing white environment at intensity 10 illuminates
+  the scene, and next event estimation samples that environment.
+
+Current renderer limitations:
+VkNRC treats all triangles as opaque. The source diffuse alpha and map_d
+opacity masks are preserved but not evaluated, so leaves and chains retain
+their rectangular polygon silhouettes. Bump maps and OBJ vertex normals are
+also preserved but ignored; shading uses geometric triangle normals. The
+renderer uses its existing Beckmann reflection model without transmission.
+Texture maps replace the corresponding constant material colors. These
+limitations mean this is not an exact reproduction of Crytek's source renders.
+
+Reproduce the import from the repository root (Python 3.11+, standard library):
+python scripts/import-crytek-sponza.py --archive build/scene-import/crytek-sponza.zip
+
+You may share and adapt the licensed material, including commercially, provided
+you give appropriate credit, link the license and indicate modifications.
+No endorsement by the original authors is implied. The license governs.
